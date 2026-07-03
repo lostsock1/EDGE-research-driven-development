@@ -75,6 +75,24 @@ Then, minutes later: `✅ PR #12 CI: all checks green — ready for human merge.
 - OpenClaw config: your own backup from the setup step; `openclaw config validate` before restart.
 - Branch protection off (emergencies only): `gh api -X DELETE repos/OWNER/REPO/branches/BRANCH/protection`
 
+## Multiple projects on one server
+
+The wrapper's config file describes the **default** project. A second project reuses the same wrapper and coder agents with per-dispatch overrides — no second install needed:
+
+```bash
+EDGE_CODER_THREAD=<other-topic-id> \
+bash ~/.openclaw/shared-scripts/edge-coder-run.sh --dir <other-repo-root> '<task>'
+```
+
+(`EDGE_CODER_TARGET` too if the thread lives in a different group.) Bake exactly this command into the second project's charter so its research agent never dispatches with the defaults. Each project gets its own charter + RESUME.md (`workspace-edge/` templates rendered with that project's values), its own topic binding, and its own `docs/agent/` seed in its repo. Note: the per-repo lock is already per-`--dir`, so two projects can dispatch concurrently; the completion messages route to each project's own thread via the env override.
+
+Caveat: plain `RDD_*` environment variables do **not** override the config — sourcing the config file clobbers them. If the second project needs different values for anything beyond target/thread (`RDD_MAIN_BRANCH`, `RDD_DOCS_DIR`, models…), give it its own config file and point the dispatch at it:
+
+```bash
+EDGE_RDD_CONFIG=~/.config/edge-rdd/<project>.env \
+bash ~/.openclaw/shared-scripts/edge-coder-run.sh --dir <other-repo-root> '<task>'
+```
+
 ## Weekly hygiene (or just tell the agent: `sweep`)
 
 open PRs · `cm/*` branches with no PR · failed scheduled workflow runs · `TASKS.md` boxes vs reality · `PROJECT_STATE.md` truthfulness · wrapper ledger for repeated tier failures (a persistently failing tier deserves demotion in `RDD_MODELS`).

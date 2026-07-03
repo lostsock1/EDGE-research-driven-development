@@ -114,12 +114,15 @@ if [ "$APPLY" = 1 ]; then
   mkdir -p "$WS/projects/${RDD_PROJECT_SLUG}"
   backup "$WS/USER.md"
   cp rendered/workspace-edge/USER.md "$WS/USER.md"
-  if [ ! -f "$WS/projects/${RDD_PROJECT_SLUG}/PROJECT.md" ]; then
-    cp rendered/workspace-edge/PROJECT.md "$WS/projects/${RDD_PROJECT_SLUG}/PROJECT.md"
-    echo "installed: project charter -> $WS/projects/${RDD_PROJECT_SLUG}/PROJECT.md"
-  else
-    echo "kept existing: $WS/projects/${RDD_PROJECT_SLUG}/PROJECT.md (diff against rendered/ manually)"
-  fi
+  for wf in PROJECT.md RESUME.md; do
+    if [ ! -f "$WS/projects/${RDD_PROJECT_SLUG}/$wf" ]; then
+      cp "rendered/workspace-edge/$wf" "$WS/projects/${RDD_PROJECT_SLUG}/$wf"
+      echo "installed: $wf -> $WS/projects/${RDD_PROJECT_SLUG}/$wf"
+    else
+      echo "kept existing: $WS/projects/${RDD_PROJECT_SLUG}/$wf (diff against rendered/ manually)"
+    fi
+  done
+  mkdir -p "$WS/projects/${RDD_PROJECT_SLUG}/notes"
 
   # 5. project-repo handoff docs — only fill gaps, never overwrite live docs
   if [ -d "${RDD_REPO_DIR:-/nonexistent}/.git" ]; then
