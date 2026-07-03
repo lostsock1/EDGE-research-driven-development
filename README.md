@@ -2,7 +2,7 @@
 
 **A complete, battle-tested scaffolding for running an autonomous research → implementation → PR pipeline from a chat thread, on your own server, with a human holding the only merge button.**
 
-One Telegram thread. A research agent (**EDGE**, running in [OpenClaw](https://openclaw.ai)) that studies your project, drafts work orders, and asks for your *go*. A coder team (**code-monkeys**, running in [opencode](https://opencode.ai)) that implements on feature branches and opens PRs. GitHub branch protection + CI as the mechanical quality gate. You read a plain-language summary on your phone and tap **merge**.
+One Telegram thread. A research agent (**EDGE**, running in [OpenClaw](https://openclaw.ai), animated by the **FRONTIER** persona — a truth-seeking operating philosophy that pre-registers its experiments and prizes refutation over confirmation) that studies your project, drafts work orders, and asks for your *go*. A coder team (**code-monkeys**, running in [opencode](https://opencode.ai)) that implements on feature branches and opens PRs. GitHub branch protection + CI as the mechanical quality gate. You read a plain-language summary on your phone and tap **merge**.
 
 ```text
 you (Telegram) ──"go"──▶ EDGE ──dispatch──▶ wrapper ──tier ladder──▶ coder ──▶ PR
@@ -22,7 +22,7 @@ This template is extracted from a production setup running commercial-grade soft
 | **Coder agents** | `opencode/agents/code-monkeys/` | Primary coder + independent read-only reviewer + shared doctrine. Permission maps tuned for **non-interactive** dispatch (no `ask` traps), with hard denies on merges, force-pushes, and secrets |
 | **Research agent** | `openclaw/agent.edge.json5`, `openclaw/topic.project-thread.json5` | OpenClaw agent definition + Telegram topic binding with the full async-dispatch operating instructions baked into the system prompt |
 | **Agent workspace** | `workspace-edge/` | Project charter (the 10-point research-driven-development operating loop) + the plain-lingo **communication contract** + RESUME.md restart packet |
-| **Persona library** | `workspace-edge/personas/` | Four swappable operating philosophies for the research agent — **FRONTIER** (Feyerabend × Deutsch recombinant-synthesis engine, the default, seeded into `SOUL.md`), AGAINST, INFINITY, BAYESIAN — with the activation mechanism documented (copy over `SOUL.md`; a `PERSONA.md` marker does nothing) |
+| **Persona library** | `workspace-edge/personas/` | Four swappable operating philosophies for the research agent — **FRONTIER v2.1** (default, seeded into `SOUL.md`; see [The personality](#the-personality-frontier)), AGAINST, INFINITY, BAYESIAN — with the activation mechanism documented (copy over `SOUL.md`; a `PERSONA.md` marker does nothing) |
 | **Repo handoff docs** | `project-repo/docs/agent/` | The git-tracked protocol both sides read: `PROJECT_STATE` · `TASKS` · `QUALITY_GATES` · `KNOWLEDGE_STAGING` · `RESEARCH_TRANSFER` · `EDGE_COLLABORATION` |
 | **GitHub gate** | `github/protect-branch.sh`, `project-repo/.github/workflows/ci.yml.example` | One-command branch protection (required checks, up-to-date branch, no force-push, admins included, 0 approvals — *you* are the approval) |
 | **Installer** | `install.sh`, `template.env.example` | Fill one env file, render, review, `--apply` with automatic backups |
@@ -35,6 +35,24 @@ This template is extracted from a production setup running commercial-grade soft
 3. **The human gate is mechanical.** Agents physically cannot push to the trunk — GitHub rejects it. Everything lands as a PR with green required checks, and only the operator merges. This is why agent permissions can be permissive enough to actually work unattended.
 4. **Fallback is owned, visible, and resumable.** The wrapper's model tier ladder classifies every failure (`rate-limited → deepseek-v4-pro` in the completion message), and a failed tier's partial work is handed to the next tier with "continue, don't restart".
 5. **Trust nothing you can verify.** The wrapper checks the completion trailer mechanically, resolves branch/commits/PR from git itself, and posts what actually happened — not what the model claims happened.
+
+## The personality: FRONTIER
+
+The pipeline's mechanics assume a research agent that *wants* to refute its own ideas — that disposition is supplied by **FRONTIER** (`workspace-edge/personas/FRONTIER.md`, v2.1), the default persona seeded into the agent's `SOUL.md` and injected into every session.
+
+**The engine:** two ways to create novelty — *assembly* (absorb the working mechanisms from papers, repos, and adjacent fields, then recombine them into a new hard-to-vary whole) and *spark* (hunt the missing link whose absence blocks a whole region). Generation is anarchic (Feyerabend: proliferate rivals, counterinduce, no authority); evaluation is ruthless (Deutsch: one criterion — *hard to vary* — every detail load-bearing or deleted).
+
+**The discipline:** every experiment is pre-registered **on disk** before it runs — hypothesis, rival, discriminating prediction, and the refutation condition that kills the favored idea; a recorded pre-commitment is a goalpost that can't quietly move. The persona also names the failure modes of the LLM running it — sycophantic convergence, confirmation in self-grading, confident out-of-distribution assertion, goalpost drift — each with its check.
+
+**The loop interface (v2.1):** FRONTIER was rewired for exactly this pipeline —
+
+- **Decisions bind action, not belief.** Frozen decision rules, accepted ADRs, and the operator's gates hold while they stand; they're challenged through the promotion path with new evidence, never re-litigated in passing.
+- **Implementer reality-feedback is a second oracle** — refutation of the highest grade, *because the researcher couldn't shape the test*.
+- **A dispatch is the most expensive experiment available**, so the work order *is* its pre-registration (ID, acceptance criteria, out-of-scope, frozen rule).
+- **Clerk mode:** relays, sweeps, and doc updates get zero creativity — precision there buys the license to be radical everywhere else.
+- **The null is a result.** "Nothing worth promoting" is valid, reportable output — an autonomous loop that must always find something starts confabulating on schedule (*manufactured cadence*, a named failure mode).
+
+Three alternates ship alongside (AGAINST · INFINITY · BAYESIAN — see `workspace-edge/personas/README.md`); swap by copying over `SOUL.md`, or overlay a different persona on a single topic. Swapping changes how aggressively the research side criticizes itself — the mechanical gates (branch protection, CI, reviewer, human merge) hold regardless.
 
 ## Quickstart
 
