@@ -124,6 +124,23 @@ if [ "$APPLY" = 1 ]; then
   done
   mkdir -p "$WS/projects/${RDD_PROJECT_SLUG}/notes"
 
+  # 4b. persona library + SOUL.md (the agent's operating philosophy).
+  # SOUL.md is the OpenClaw-loaded bootstrap file; PERSONA.md is a non-loaded
+  # marker — see workspace-edge/personas/README.md. Never overwrite a live SOUL.md.
+  mkdir -p "$WS/personas"
+  cp rendered/workspace-edge/personas/* "$WS/personas/"
+  PERSONA="${RDD_PERSONA:-FRONTIER}"
+  if [ ! -f "$WS/SOUL.md" ]; then
+    if [ -f "$WS/personas/${PERSONA}.md" ]; then
+      cp "$WS/personas/${PERSONA}.md" "$WS/SOUL.md"
+      echo "installed: persona ${PERSONA} -> $WS/SOUL.md"
+    else
+      echo "WARNING: persona ${PERSONA} not found in $WS/personas/ — SOUL.md not seeded"
+    fi
+  else
+    echo "kept existing: $WS/SOUL.md (swap manually: cp $WS/personas/${PERSONA}.md $WS/SOUL.md)"
+  fi
+
   # 5. project-repo handoff docs — only fill gaps, never overwrite live docs
   if [ -d "${RDD_REPO_DIR:-/nonexistent}/.git" ]; then
     mkdir -p "$RDD_REPO_DIR/$RDD_DOCS_DIR"

@@ -44,6 +44,7 @@ This installs (with timestamped backups under `~/.config/edge-rdd/backups/`):
 | dispatch wrapper | `~/.openclaw/shared-scripts/edge-coder-run.sh` |
 | opencode agents | `~/.config/opencode/agents/code-monkeys/` |
 | communication contract | `~/.openclaw/workspace-<agent>/USER.md` |
+| persona library + SOUL.md | `~/.openclaw/workspace-<agent>/personas/` (default `RDD_PERSONA=FRONTIER` seeded to `SOUL.md`; existing SOUL.md never overwritten) |
 | project charter | `~/.openclaw/workspace-<agent>/projects/<slug>/PROJECT.md` |
 | repo handoff docs | `<repo>/docs/agent/` (only files that don't exist yet) |
 
