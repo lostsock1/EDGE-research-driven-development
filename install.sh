@@ -124,6 +124,16 @@ if [ "$APPLY" = 1 ]; then
   done
   mkdir -p "$WS/projects/${RDD_PROJECT_SLUG}/notes"
 
+  # 4c. Superior Architecture — the north-star research-track doc. Created once
+  # per project, then maintained by the research agent. Never overwrite a live one.
+  SA="$WS/projects/${RDD_PROJECT_SLUG}/notes/SUPERIOR_ARCHITECTURE.md"
+  if [ ! -f "$SA" ]; then
+    cp rendered/workspace-edge/SUPERIOR_ARCHITECTURE.md "$SA"
+    echo "installed: SUPERIOR_ARCHITECTURE.md -> $SA"
+  else
+    echo "kept existing: $SA (diff against rendered/ manually)"
+  fi
+
   # 4b. persona library + SOUL.md (the agent's operating philosophy).
   # SOUL.md is the OpenClaw-loaded bootstrap file; PERSONA.md is a non-loaded
   # marker — see workspace-edge/personas/README.md. Never overwrite a live SOUL.md.

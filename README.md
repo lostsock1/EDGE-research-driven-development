@@ -22,6 +22,7 @@ This template is extracted from a production setup running commercial-grade soft
 | **Coder agents** | `opencode/agents/code-monkeys/` | Primary coder + independent read-only reviewer + shared doctrine. Permission maps tuned for **non-interactive** dispatch (no `ask` traps), with hard denies on merges, force-pushes, and secrets |
 | **Research agent** | `openclaw/agent.edge.json5`, `openclaw/topic.project-thread.json5` | OpenClaw agent definition + Telegram topic binding with the full async-dispatch operating instructions baked into the system prompt |
 | **Agent workspace** | `workspace-edge/` | Project charter (the 10-point evidence-driven engineering operating loop) + the plain-lingo **communication contract** + RESUME.md restart packet |
+| **North-star doc** | `workspace-edge/SUPERIOR_ARCHITECTURE.md` | The theoretical best-known architecture, seeded per project **outside** the repo — fed by external research *and* the project's own internal evidence (evals/ADRs/experiments/reality-feedback), distilled to hardware-independent mechanism, promoted into the repo only through the staging pipeline. The unconstrained design track that pulls the roadmap forward without ever blurring into it |
 | **Persona library** | `workspace-edge/personas/` | Four swappable operating philosophies for the research agent — **FRONTIER v2.1** (default, seeded into `SOUL.md`; see [The personality](#the-personality-frontier)), AGAINST, INFINITY, BAYESIAN — with the activation mechanism documented (copy over `SOUL.md`; a `PERSONA.md` marker does nothing) |
 | **Repo handoff docs** | `project-repo/docs/agent/` | The git-tracked protocol both sides read: `PROJECT_STATE` · `TASKS` · `QUALITY_GATES` · `KNOWLEDGE_STAGING` · `RESEARCH_TRANSFER` · `EDGE_COLLABORATION` |
 | **GitHub gate** | `github/protect-branch.sh`, `project-repo/.github/workflows/ci.yml.example` | One-command branch protection (required checks, up-to-date branch, no force-push, admins included, 0 approvals — *you* are the approval) |
@@ -35,6 +36,15 @@ This template is extracted from a production setup running commercial-grade soft
 3. **The human gate is mechanical.** Agents physically cannot push to the trunk — GitHub rejects it. Everything lands as a PR with green required checks, and only the operator merges. This is why agent permissions can be permissive enough to actually work unattended.
 4. **Fallback is owned, visible, and resumable.** The wrapper's model tier ladder classifies every failure (`rate-limited → deepseek-v4-pro` in the completion message), and a failed tier's partial work is handed to the next tier with "continue, don't restart".
 5. **Trust nothing you can verify.** The wrapper checks the completion trailer mechanically, resolves branch/commits/PR from git itself, and posts what actually happened — not what the model claims happened.
+
+## Two tracks: what ships vs. the north star
+
+The loop keeps **two parallel artifacts** and never blurs them:
+
+- **The roadmap** (`docs/agent/ROADMAP.md`, `TASKS.md`, in the repo) — what can ship *now*, under the real deployment's constraints.
+- **The north star** (`workspace-edge/SUPERIOR_ARCHITECTURE.md`, seeded per project into `projects/<slug>/notes/`) — the theoretical *best* architecture, under realistic-but-generous hardware with full model access, held **outside** the repo.
+
+The north star is deliberately unconstrained by the current hardware, so it pulls the roadmap forward instead of rationalizing it. It is a **two-input synthesis** — external research *and* the project's own internal evidence (evals, ADRs, contained experiments, coder reality-feedback), each distilled to the **mechanism truth that survives on any hardware** (hardware/latency/cost limits stay in the repo docs, cited in the north star only where they reveal a mechanism, never as a constraint). Findings cross into the repo only as gated slot-replacement packets through the staging pipeline; implementation reality flows back in; and when a mechanism is built and proven, that is recorded as evidence the design is real. Created at kickoff, maintained by the research agent, versioned with an evidence-weighted changelog — one honest record of "the best design we can currently defend," kept separate from "what we shipped."
 
 ## The personality: FRONTIER
 

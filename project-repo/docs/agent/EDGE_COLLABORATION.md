@@ -10,6 +10,7 @@ This file is the durable two-way channel between the research agent (EDGE) and t
 - contained lab experiments outside the production repo
 - architecture / stack / model decisions and ADRs
 - distilled recommendations, promoted via `RESEARCH_TRANSFER.md`
+- the living **Superior Architecture** north-star doc (maintained outside the repo); reality-feedback logged here is folded back into it so the best-known design and the shipped code stay honest with each other
 
 ### Coding agents own
 

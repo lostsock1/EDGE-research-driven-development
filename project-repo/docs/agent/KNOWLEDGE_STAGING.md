@@ -43,3 +43,7 @@ Reject (or bounce back to EDGE) any packet that arrives without: a named slot/ba
 ## Frozen decision rules
 
 For any performance/quality claim, the decision rule (metric, threshold, dataset, pass/fail condition) is **frozen in the work order before measurement**. No post-hoc threshold tuning. If the frozen gate turns out to measure the wrong thing, that is itself a research finding: record it, amend the gate design through a new proposal, and re-measure — never quietly move the goalposts on live data.
+
+## The north-star source (Superior Architecture)
+
+`raw`/`extracted`/`candidate` work is synthesized in the research agent's living **Superior Architecture** doc — the theoretical best-known design, maintained *outside* this repo under realistic-but-generous-hardware, full-model-access assumptions. That doc is where external research and this project's own internal evidence (evals, ADRs, contained experiments, reality-feedback) are reconciled into hardware-independent mechanism truths. A mechanism becomes a `proposed` packet here only when it is ready to change an execution surface; **the north-star doc itself never enters the repo.** Rejections and implemented-and-proven outcomes are fed back into it, so the north star and the shipped code stay honest with each other.

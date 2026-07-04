@@ -11,6 +11,11 @@ Active branch: `{{MAIN_BRANCH}}`.
      the current design but to keep testing it against current research,
      production practice, and experimental evidence. -->
 
+The output of this thread improves two durable, parallel artifacts:
+
+1. the **implementation-facing roadmap** for <{{REPO_URL}}> on `{{MAIN_BRANCH}}`, updated only through distilled, implementation-changing findings; and
+2. **Superior {{PROJECT_NAME}} Architecture** (`projects/{{PROJECT_SLUG}}/notes/SUPERIOR_ARCHITECTURE.md`) — the theoretical best architecture under realistic-but-generous hardware with full model access, maintained outside the repo and promoted in only through the staging pipeline (see "Superior Architecture" below).
+
 ## Repository sync target
 
 {{AGENT_NAME}} keeps a local repository mirror and implementation-facing roadmap analysis synchronized with `{{MAIN_BRANCH}}`. Coding agents only receive promoted implementation impact through active docs and ADRs — never through raw chat.
@@ -20,6 +25,15 @@ Knowledge staging statuses: raw → extracted → candidate → proposed → acc
 Active coding-agent docs on `{{MAIN_BRANCH}}` (in `{{DOCS_DIR}}/`):
 
 - `PROJECT_STATE.md` · `TASKS.md` · `QUALITY_GATES.md` · `KNOWLEDGE_STAGING.md` · `RESEARCH_TRANSFER.md` · `EDGE_COLLABORATION.md`
+
+## Superior Architecture (north-star research track)
+
+`projects/{{PROJECT_SLUG}}/notes/SUPERIOR_ARCHITECTURE.md` is the theoretical **best** architecture for {{PROJECT_NAME}} — a living research doc maintained **outside** the repo, in parallel with the shipping roadmap and never blurred into it. Rules {{AGENT_NAME}} holds:
+
+- **Scope discipline.** It assumes realistic-but-generous hardware and full model access; it is **not** bound to the current deployment target. Hardware / latency / cost / RAM limits are deployment concerns for the repo docs and `RESUME.md`, cited in the north star **only** where they reveal a hardware-independent mechanism, never as an architecture constraint.
+- **Two inputs, one synthesis.** It is fed by external research **and** this project's own internal evidence (evals, ADRs, contained experiments, coder reality-feedback), each distilled to the mechanism truth that survives on any hardware.
+- **Maintain it** whenever either input changes what "best" means; keep it ahead of, or level with, the dated notes that feed it. "No change this cycle" is a valid result — do not manufacture revisions.
+- **Promotion is gated and one-directional.** Findings reach the repo only as slot-replacement packets through `{{DOCS_DIR}}/KNOWLEDGE_STAGING.md` → `RESEARCH_TRANSFER.md` → `TASKS.md`/ADR. Reality-feedback from `{{DOCS_DIR}}/EDGE_COLLABORATION.md` flows back into it. The north-star doc itself never enters the repo.
 
 ## Code-monkeys implementation bridge
 
@@ -43,7 +57,7 @@ The standing cycle for this project. **Communication contract for every post her
 
 Research side:
 
-1. Research continuously (watchlist, pasted links, contained experiments). Distill findings to mechanisms, not summaries. Stage implementation-relevant material in `KNOWLEDGE_STAGING.md`; promote only implementation-changing findings (`RESEARCH_TRANSFER.md` → `TASKS.md`, + ADR if architecture changes).
+1. Research continuously (watchlist, pasted links, contained experiments). Distill findings to mechanisms, not summaries. Keep **Superior Architecture** (`projects/{{PROJECT_SLUG}}/notes/SUPERIOR_ARCHITECTURE.md`) current as the north star — revise it when external research or internal evidence changes what "best" means. Stage implementation-relevant material in `KNOWLEDGE_STAGING.md`; promote only implementation-changing findings (`RESEARCH_TRANSFER.md` → `TASKS.md`, + ADR if architecture changes) — from the north star, never straight from chat.
 2. Every implementation task is a **work order** before dispatch: TASKS.md ID, acceptance criteria, out-of-scope list, expected file surface — and for any performance/quality claim, the decision rule is **frozen before measurement** (gates per `QUALITY_GATES.md`). No post-hoc threshold tuning. Negative results are recorded, not discarded.
 3. **Ask before dispatch:** post the work order summary (ID, goal, acceptance criteria, risk) in the thread and wait for the operator's "go". Doc-only fixes may skip the ask.
 4. On completion messages: relay model + PR link; surface any failure immediately. When CI is green, tell the operator plainly: "PR #N ready — merge when you want" with the link. {{AGENT_NAME}} never merges.
@@ -70,6 +84,7 @@ Default stance: research first, update text artifacts, run experiments only when
 ## Durable artifacts
 
 - **Resume State** — `projects/{{PROJECT_SLUG}}/RESUME.md`, the first-read operational snapshot for session restart recovery. Update it before ending meaningful work.
+- **Superior Architecture** — `projects/{{PROJECT_SLUG}}/notes/SUPERIOR_ARCHITECTURE.md`, the theoretical best-known architecture (north star), maintained outside the repo under generous-hardware + full-model-access assumptions and promoted in only through staging.
 - **Research Watchlist** — current research and implementation signals worth tracking.
 - Roadmap notes for <{{REPO_URL}}> branch `{{MAIN_BRANCH}}`.
 - Experiment records: hypotheses, rivals, metrics, results, confounds, conclusions.
