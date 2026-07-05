@@ -235,9 +235,15 @@ def send_message(dest, text, buttons=None, dry=False):
     if dest["thread"]:
         cmd += ["--thread-id", dest["thread"]]
     if buttons:
+        # IMPORTANT: use "command" actions, NOT "callback". OpenClaw encodes a
+        # callback button's value into an OPAQUE payload (tgcb1:…) and its
+        # Telegram handler DROPS opaque callbacks that no plugin claims — so a
+        # tap does nothing. A "command" action encodes as a native command that
+        # IS delivered to the agent as text ("/gate act eg:<id>"), which the
+        # gate skill runs. Each button's value here is that command string.
         blocks = [{"type": "buttons",
                    "buttons": [{"label": lab,
-                                "action": {"type": "callback", "value": val}}]}
+                                "action": {"type": "command", "command": val}}]}
                   for lab, val in buttons]
         cmd += ["--presentation", json.dumps({"blocks": blocks})]
     if dry:
@@ -535,7 +541,7 @@ def sweep(dry=False):
                              f"for {REASK_HOURS:.0f}h.")
             lines.append(approve_help)
 
-            buttons = [(a["button"], f"eg:{aid}") for aid, a in shown]
+            buttons = [(a["button"], f"/gate act eg:{aid}") for aid, a in shown]
             # Supersede any prior pending batch/snooze for this project — a new ask
             # replaces them so a stale "do all" can't fire against old state.
             for sid, sa in state["actions"].items():
@@ -552,7 +558,7 @@ def sweep(dry=False):
                     "button": f"☑️ Do all {len(actions)} of the above",
                     "status": "pending", "created": now,
                 }
-                buttons.append((f"☑️ Do all {len(actions)} of the above", f"eg:{batch_id}"))
+                buttons.append((f"☑️ Do all {len(actions)} of the above", f"/gate act eg:{batch_id}"))
             snooze_id = secrets.token_hex(6)
             state["actions"][snooze_id] = {
                 "key": f"snooze:{int(now)}", "label": label, "cfg": proj["cfg"],
@@ -561,7 +567,7 @@ def sweep(dry=False):
                 "button": "⏸ Not now (snooze 24h)",
                 "status": "pending", "created": now,
             }
-            buttons.append((f"⏸ Not now (snooze {REASK_HOURS:.0f}h)", f"eg:{snooze_id}"))
+            buttons.append((f"⏸ Not now (snooze {REASK_HOURS:.0f}h)", f"/gate act eg:{snooze_id}"))
             ok = send_message(dest, "\n".join(lines), buttons, dry=dry)
             if ok and not dry:
                 state["posts"][label] = {"fingerprint": fp, "ts": now,

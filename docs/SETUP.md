@@ -73,8 +73,15 @@ This installs (with timestamped backups under `~/.config/edge-rdd/backups/`):
    ```
 
    Without this, approvals only work via a `👍`/`approve` reply, not the buttons.
-   A tapped button is delivered to the agent as the text `callback_data: eg:<id>`
-   (the topic prompt already tells the agent to handle that form).
+
+   > **Why the gate uses command-style buttons.** OpenClaw encodes a *callback*
+   > button's value into an opaque payload, and its Telegram handler silently
+   > drops opaque callbacks that no plugin claims — so a tap does nothing. The
+   > gate therefore emits **`command` buttons** (`action.type: "command"`,
+   > `command: "/gate act eg:<id>"`), which Telegram delivers to the agent as the
+   > native command text `/gate act eg:<id>`; the `gate` skill runs it. This is
+   > already how `edge-pr-gate.sh` builds its buttons — no action needed, just
+   > don't switch them back to `callback` actions.
 5. Validate and restart:
 
 ```bash
