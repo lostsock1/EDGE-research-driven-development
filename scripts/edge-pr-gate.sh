@@ -507,17 +507,37 @@ def sweep(dry=False):
                 lines.append(f"+{len(overflow)} more pending action(s) not shown as buttons "
                              f"(button cap {MAX_BUTTONS}) — say “gate pending” to list them all.")
                 lines.append("")
-            lines.append(
-                "How to approve: tap the matching button below, or react \U0001f44d/✅ to "
-                "this message, or reply “approve” — for a single pending item I act it; "
-                "if several match I'll ask which. Not ready? Tap “Not now” to snooze this "
-                f"project's asks for {REASK_HOURS:.0f}h.")
+            do_all = len(actions) >= 2
+            approve_help = (
+                "How to approve: tap a button below, or react \U0001f44d/✅ to this message, "
+                "or reply “approve” — for a single pending item I act it; if several match "
+                "I'll ask which.")
+            if do_all:
+                approve_help += (f" To clear the whole project in one go, tap “Do all "
+                                 f"{len(actions)} of the above” — I run every item, "
+                                 f"re-verifying each before it executes.")
+            approve_help += (f" Not ready? Tap “Not now” to snooze this project's asks "
+                             f"for {REASK_HOURS:.0f}h.")
+            lines.append(approve_help)
 
             buttons = [(a["button"], f"eg:{aid}") for aid, a in shown]
+            # Supersede any prior pending batch/snooze for this project — a new ask
+            # replaces them so a stale "do all" can't fire against old state.
             for sid, sa in state["actions"].items():
-                if sa["label"] == label and sa["kind"] == "snooze" and sa["status"] == "pending":
+                if (sa["label"] == label and sa["status"] == "pending"
+                        and sa["kind"] in ("snooze", "batch")):
                     sa["status"] = "superseded"
                     sa["result"] = "newer gate ask posted"
+            if do_all:
+                batch_id = secrets.token_hex(6)
+                state["actions"][batch_id] = {
+                    "key": f"batch:{int(now)}", "label": label, "cfg": proj["cfg"],
+                    "repo": facts["slug"], "trunk": proj["trunk"], "kind": "batch",
+                    "desc": f"do all {len(actions)} pending action(s) for {label}",
+                    "button": f"☑️ Do all {len(actions)} of the above",
+                    "status": "pending", "created": now,
+                }
+                buttons.append((f"☑️ Do all {len(actions)} of the above", f"eg:{batch_id}"))
             snooze_id = secrets.token_hex(6)
             state["actions"][snooze_id] = {
                 "key": f"snooze:{int(now)}", "label": label, "cfg": proj["cfg"],
@@ -568,7 +588,32 @@ def act(aid):
             print(f"FAILED project config for {a['label']} no longer exists")
             sys.exit(4)
 
-        outcome, ok = execute(a, proj)
+        if a["kind"] == "batch":
+            # "Do all of the above": execute EVERY still-pending merge/prune for
+            # this project (covers overflow beyond the shown buttons too). Each
+            # goes through execute()'s own re-verification independently, so a
+            # PR that went red since the ask is skipped, not force-merged.
+            siblings = [(sid, sa) for sid, sa in state["actions"].items()
+                        if sa["label"] == a["label"] and sa["status"] == "pending"
+                        and sa["kind"] in ("merge", "prune")]
+            siblings.sort(key=lambda r: r[1]["created"])
+            if not siblings:
+                outcome, ok = f"{a['label']}: nothing left to do (all items already handled)", True
+            else:
+                results, ok = [], True
+                for sid, sa in siblings:
+                    o, k = execute(sa, proj)
+                    sa["status"] = "done" if k else "failed"
+                    sa["result"] = o
+                    sa["acted"] = time.time()
+                    results.append(("✅ " if k else "❌ ") + o)
+                    ok = ok and k
+                outcome = (f"{a['label']}: ran {len(siblings)} action(s) "
+                           f"[{sum(1 for _, s in siblings if s['status'] == 'done')} ok, "
+                           f"{sum(1 for _, s in siblings if s['status'] == 'failed')} failed]:\n"
+                           + "\n".join(results))
+        else:
+            outcome, ok = execute(a, proj)
         a["status"] = "done" if ok else "failed"
         a["result"] = outcome
         a["acted"] = time.time()
@@ -641,7 +686,7 @@ def sync_local(proj):
 
 def _pending(state, label=None):
     rows = [(aid, a) for aid, a in state["actions"].items()
-            if a["status"] == "pending" and a["kind"] != "snooze"
+            if a["status"] == "pending" and a["kind"] not in ("snooze", "batch")
             and (label is None or a["label"].lower() == label.lower())]
     if not rows:
         print("no pending actions" + (f" for {label}" if label else ""))

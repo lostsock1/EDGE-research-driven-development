@@ -120,6 +120,12 @@ if [ "$APPLY" = 1 ]; then
   } > "$HOME/.config/edge-rdd/gate.env"
   echo "installed: ~/.config/edge-rdd/gate.env (gate hub thread)"
 
+  # 2d. gate skill — registers the /gate slash command (and /skill gate).
+  mkdir -p "$RDD_HOME/.openclaw/skills/gate"
+  backup "$RDD_HOME/.openclaw/skills/gate/SKILL.md"
+  cp rendered/openclaw/skills/gate/SKILL.md "$RDD_HOME/.openclaw/skills/gate/SKILL.md"
+  echo "installed: ~/.openclaw/skills/gate/SKILL.md (/gate command)"
+
   # 3. opencode agents
   mkdir -p "$RDD_HOME/.config/opencode/agents/code-monkeys"
   for f in rendered/opencode/agents/code-monkeys/*; do
@@ -200,6 +206,7 @@ if [ "$APPLY" = 1 ]; then
   echo ""
   echo "=== MANUAL STEPS REMAINING (never automated) ==="
   echo "1. Merge rendered/openclaw/agent.edge.json5 into agents.list[] in ~/.openclaw/openclaw.json"
+  echo "   (its skills[] includes \"gate\" — keep it so /gate works; the list is an allowlist)"
   echo "2. Merge rendered/openclaw/topic.project-thread.json5 into your Telegram group's topics map"
   echo "3. openclaw config validate && systemctl --user restart openclaw-gateway"
   echo "4. Copy project-repo/.github/workflows/ci.yml.example into your repo as .github/workflows/ci.yml and adapt"

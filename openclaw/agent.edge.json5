@@ -26,7 +26,10 @@
     ],
   },
 
-  skills: ["github", "gh-issues"],
+  // "gate" registers the /gate slash command (the PR-gate skill in
+  // openclaw/skills/gate/); keep it here or the agent can't invoke it, since a
+  // per-agent skills[] list is an allowlist that replaces the defaults.
+  skills: ["github", "gh-issues", "gate"],
   sandbox: { mode: "off" },
 
   // Heartbeat — powers the PR gate's periodic GitHub sweep (the 6h task lives

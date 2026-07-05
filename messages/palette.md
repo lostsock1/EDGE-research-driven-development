@@ -13,8 +13,8 @@
 
 🚢 SHIP & REPO
 • sweep — open PRs, stale branches, failed workflows, TASKS drift → one status post
-• gate sweep — PR gate now: green PRs + stale branches → approval buttons here (auto every 6h)
-• gate pending — list open gate asks (tap a button, react 👍, or say "approve" to execute one)
+• /gate (or gate sweep) — PR gate now: green PRs + stale branches → approval buttons in the gate thread (auto every 6h)
+• /gate pending — list open gate asks (tap a button, react 👍, say "approve", or use "☑️ Do all N" to clear a project)
 • fix the red PR — work order referencing the failing check → go-gate → dispatch
 • merged — post-merge closeout: TASKS checkboxes, RESUME.md, EDGE_COLLABORATION answers
 • docs true? — verify PROJECT_STATE/TASKS/README against {{MAIN_BRANCH}}; drift becomes a work order

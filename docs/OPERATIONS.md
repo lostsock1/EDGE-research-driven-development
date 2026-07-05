@@ -112,11 +112,16 @@ still green, branch still stale) before executing `gh pr merge --squash
 --delete-branch` (or the branch delete), posts the outcome, and burns the id.
 A refused/stale action explains itself and does nothing.
 
+When a project has ≥2 pending items the ask also shows a **“☑️ Do all N of the above”** button that approves them all at once — each still re-verified individually before it runs.
+
+The gate is also a slash command (the `gate` skill), so you can drive it directly:
+
 | You type | What happens |
 |---|---|
-| `gate sweep` | run the sweep now (heartbeat does it every 6h anyway) |
-| `gate pending` | list open asks with their `eg:<id>` handles |
-| `gate status` | pending + the last few executed/failed actions |
+| `/gate` or `/gate sweep` (or `gate sweep`) | run the sweep now (heartbeat does it every 6h anyway) |
+| `/gate pending` (or `gate pending`) | list open asks with their `eg:<id>` handles |
+| `/gate status` | pending + the last few executed/failed actions |
+| `/gate act <id>` | execute an already-approved action (same as tapping its button) |
 
 State + audit log: `~/.local/state/edge-rdd/pr-gate/` (`state.json`, `gate.log`).
 Knobs (merge strategy, re-ask window, button cap): `RDD_GATE_*` in `template.env.example`.

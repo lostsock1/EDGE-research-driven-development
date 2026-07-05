@@ -28,7 +28,7 @@ This template is extracted from a production setup running commercial-grade soft
 | **Persona library** | `workspace-edge/personas/` | Four swappable operating philosophies for the research agent — **FRONTIER v2.1** (default, seeded into `SOUL.md`; see [The personality](#the-personality-frontier)), AGAINST, INFINITY, BAYESIAN — with the activation mechanism documented (copy over `SOUL.md`; a `PERSONA.md` marker does nothing) |
 | **Repo handoff docs** | `project-repo/docs/agent/` | The git-tracked protocol both sides read: `PROJECT_STATE` · `TASKS` · `QUALITY_GATES` · `KNOWLEDGE_STAGING` · `RESEARCH_TRANSFER` · `EDGE_COLLABORATION` |
 | **GitHub gate** | `github/protect-branch.sh`, `project-repo/.github/workflows/ci.yml.example` | One-command branch protection (required checks, up-to-date branch, no force-push, admins included, 0 approvals — *you* are the approval) |
-| **PR gate** | `scripts/edge-pr-gate.sh`, `workspace-edge/HEARTBEAT.md` | Every 6h a heartbeat sweep checks every project repo — green PRs, CI verdicts, stray branches — and posts **one-tap approval buttons**, each with a what/consequence/why brief, into **one gate thread**. You tap ✅ (or react 👍), the agent re-verifies and executes the merge / branch cleanup, and every repo converges back to **trunk-only**. See [The PR gate](#the-pr-gate-approve-merges-with-one-tap) |
+| **PR gate** | `scripts/edge-pr-gate.sh`, `workspace-edge/HEARTBEAT.md` | Every 6h a heartbeat sweep checks every project repo — green PRs, CI verdicts, stray branches — and posts **one-tap approval buttons** (per item, plus **Do-all**), each with a what/consequence/why brief, into **one gate thread**. You tap ✅ (or react 👍, or type `/gate`), the agent re-verifies and executes the merge / branch cleanup, and every repo converges back to **trunk-only**. See [The PR gate](#the-pr-gate-approve-merges-with-one-tap) |
 | **Installer** | `install.sh`, `template.env.example` | Fill one env file, render, review, `--apply` with automatic backups |
 | **Thread bootstrap** | `scripts/kickoff.sh`, `messages/` | One-shot first-boot handshake: **preflights the GitHub connection** (gh auth, reachable repo, matching clone, protection), then posts the development-kickoff + pinnable **command palette** into the project thread |
 
@@ -53,7 +53,9 @@ Anything actionable — a green PR ready to merge, a stale branch to prune — b
 
 **What did NOT change:** nothing merges without your explicit approval. The approval surface moved from the GitHub UI to a button in your chat; the executor moved from your thumb to the agent — *after* your tap. Actions are minted only by the sweep from observed repo state, are single-use, re-verify before executing (a stale button can never merge a PR whose CI went red), and the agent is under doctrine to never run `gh pr merge` or delete branches outside `act`. Red and pending-CI PRs are never offered as actions — they ride the normal `fix the red PR` loop.
 
-On-demand: `gate sweep` (run it now), `gate pending` (list open asks), `gate status` (pending + recent results). Dry-run everything with `edge-pr-gate.sh sweep --dry-run`.
+**Clear a whole project in one tap.** When a project has two or more pending items, the ask also carries a **“☑️ Do all N of the above”** button. Approving it runs every pending action for that project at once — each still independently re-verified before it executes, so a batch approval can never force through a PR that has since gone red.
+
+**Trigger it yourself with `/gate`.** The gate ships as a slash command (the `gate` skill): `/gate` (or `/gate sweep`) runs a sweep now, `/gate pending` lists open asks, `/gate status` shows recent results, `/gate act <id>` executes an approved action. Plain `gate sweep` / `gate pending` phrasing works too. Dry-run everything with `edge-pr-gate.sh sweep --dry-run`.
 
 ## Two tracks: what ships vs. the north star
 
