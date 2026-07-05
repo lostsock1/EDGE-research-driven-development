@@ -134,6 +134,13 @@ if [ "$APPLY" = 1 ]; then
     echo "kept existing: $SA (diff against rendered/ manually)"
   fi
 
+  # 4d. North-star spec prompt template — the method file the operator uses to
+  # generate a project's north-star specification at kickoff. Refresh with backup.
+  mkdir -p "$WS/templates"
+  backup "$WS/templates/north-star-spec.md"
+  cp rendered/workspace-edge/templates/north-star-spec.md "$WS/templates/north-star-spec.md"
+  echo "installed: north-star spec template -> $WS/templates/north-star-spec.md"
+
   # 4b. persona library + SOUL.md (the agent's operating philosophy).
   # SOUL.md is the OpenClaw-loaded bootstrap file; PERSONA.md is a non-loaded
   # marker — see workspace-edge/personas/README.md. Never overwrite a live SOUL.md.

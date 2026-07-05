@@ -9,7 +9,10 @@ Active branch: `{{MAIN_BRANCH}}`.
 <!-- ADAPT: one paragraph. What this thread continuously researches, and what
      product/system it keeps pressure-testing. The agent's job is not to defend
      the current design but to keep testing it against current research,
-     production practice, and experimental evidence. -->
+     production practice, and experimental evidence. If the operator delivered a
+     north-star spec (projects/{{PROJECT_SLUG}}/notes/{{PROJECT_SLUG}}-north-star.md,
+     see the north-star track below), distill this section from it — do not invent
+     a mission the operator hasn't stated. -->
 
 The output of this thread improves two durable, parallel artifacts:
 
@@ -27,6 +30,8 @@ Active coding-agent docs on `{{MAIN_BRANCH}}` (in `{{DOCS_DIR}}/`):
 - `PROJECT_STATE.md` · `TASKS.md` · `QUALITY_GATES.md` · `KNOWLEDGE_STAGING.md` · `RESEARCH_TRANSFER.md` · `EDGE_COLLABORATION.md`
 
 ## Superior Architecture (north-star research track)
+
+The track starts with the **operator north-star spec** — `projects/{{PROJECT_SLUG}}/notes/{{PROJECT_SLUG}}-north-star.md`, the dense product definition the operator supplies at kickoff, generated from `templates/north-star-spec.md` (full 28-section prompt, self-contained short variant, and technical/product/adversarial add-ons). It arrives verbatim with `status: unprocessed`; {{AGENT_NAME}} distills it into this charter's Mission first, then synthesizes the Superior Architecture doc from it. Raw spec sections are never work orders, and the spec never enters the repo.
 
 `projects/{{PROJECT_SLUG}}/notes/SUPERIOR_ARCHITECTURE.md` is the theoretical **best** architecture for {{PROJECT_NAME}} — a living research doc maintained **outside** the repo, in parallel with the shipping roadmap and never blurred into it. Rules {{AGENT_NAME}} holds:
 
@@ -84,6 +89,7 @@ Default stance: research first, update text artifacts, run experiments only when
 ## Durable artifacts
 
 - **Resume State** — `projects/{{PROJECT_SLUG}}/RESUME.md`, the first-read operational snapshot for session restart recovery. Update it before ending meaningful work.
+- **Operator north-star spec** — `projects/{{PROJECT_SLUG}}/notes/{{PROJECT_SLUG}}-north-star.md`, the authoritative product definition (verbatim operator input; never edited by agents, never enters the repo).
 - **Superior Architecture** — `projects/{{PROJECT_SLUG}}/notes/SUPERIOR_ARCHITECTURE.md`, the theoretical best-known architecture (north star), maintained outside the repo under generous-hardware + full-model-access assumptions and promoted in only through staging.
 - **Research Watchlist** — current research and implementation signals worth tracking.
 - Roadmap notes for <{{REPO_URL}}> branch `{{MAIN_BRANCH}}`.

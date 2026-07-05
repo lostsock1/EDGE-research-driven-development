@@ -11,7 +11,7 @@ This is the **first-read resume packet** for the {{PROJECT_NAME}} project thread
 1. This file.
 2. The project charter: `projects/{{PROJECT_SLUG}}/PROJECT.md`.
 3. If implementation state matters: the repo's `{{DOCS_DIR}}/PROJECT_STATE.md` and `TASKS.md` on `{{MAIN_BRANCH}}`.
-4. Newest notes under `projects/{{PROJECT_SLUG}}/notes/`.
+4. Newest notes under `projects/{{PROJECT_SLUG}}/notes/` — starting with the operator north-star spec (`{{PROJECT_SLUG}}-north-star.md`) if present (the authoritative product definition; unprocessed until distilled).
 5. For design/architecture questions: the north star, `projects/{{PROJECT_SLUG}}/notes/SUPERIOR_ARCHITECTURE.md`.
 
 ## Current project snapshot

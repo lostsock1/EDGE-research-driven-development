@@ -6,6 +6,7 @@ Wiring already in place:
 • Charter: projects/{{PROJECT_SLUG}}/PROJECT.md (operating loop, dispatch command, boundaries)
 • Resume packet: projects/{{PROJECT_SLUG}}/RESUME.md (first read after any gap)
 • North star: projects/{{PROJECT_SLUG}}/notes/SUPERIOR_ARCHITECTURE.md (theoretical best architecture; kept outside the repo, promoted in via staging)
+• North-star spec template: templates/north-star-spec.md (operator generates the product definition with it; it lands at projects/{{PROJECT_SLUG}}/notes/{{PROJECT_SLUG}}-north-star.md, unprocessed, for {{AGENT_NAME}} to distill)
 • Repo: {{REPO_URL}} (trunk {{MAIN_BRANCH}}, branch-protected; handoff docs in {{DOCS_DIR}}/)
 • Dispatch wired to THIS thread — completion summaries and CI verdicts arrive here automatically
 
