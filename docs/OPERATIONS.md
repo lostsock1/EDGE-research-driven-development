@@ -98,9 +98,13 @@ bash ~/.openclaw/shared-scripts/edge-coder-run.sh --dir <other-repo-root> '<task
 Every 6h (task interval in `workspace-edge/HEARTBEAT.md`) the agent runs
 `edge-pr-gate.sh sweep`: every project config in `~/.config/edge-rdd/*.env` is
 checked on GitHub — open PRs + CI verdict, and every non-trunk branch. Green
-PRs and stale branches become **single-use pending actions**, posted to the
-project's own thread as one message with an inline button per action
-(plus ⏸ snooze). Unchanged asks are not re-posted for 24h. Goal: **trunk-only repos**.
+PRs and stale branches become **single-use pending actions**, posted to **one
+gate thread** (`RDD_GATE_TG_*` in `~/.config/edge-rdd/gate.env` — set it to your
+EDGE coordination thread so every project's asks arrive in one place) as one
+message per project, each with an inline button per action, a ⏸ snooze, and a
+**plain-language brief per action: what it does, the consequence, and why it's
+offered** — so you approve an informed decision, not a bare button. Unchanged
+asks are not re-posted for 24h. Goal: **trunk-only repos**.
 
 Approve with one tap (the button), a 👍/✅ reaction, or by replying `approve`.
 The agent then runs `act <id>`, which **re-verifies** (PR still open, checks

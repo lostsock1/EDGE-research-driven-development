@@ -38,8 +38,10 @@
   heartbeat: {
     every: "30m",
     target: "telegram",
-    // Heartbeat alerts (the sweep's cross-project summary) land here; the
-    // per-project approval-button messages go to each project's own thread.
+    // Heartbeat alerts (the sweep's cross-project summary) land here. The PR
+    // gate's own approval-button messages post to the single gate thread set in
+    // ~/.config/edge-rdd/gate.env (RDD_GATE_TG_*) — point both at your EDGE
+    // coordination thread so everything gate-related arrives in one place.
     to: "{{TG_TARGET}}:topic:{{TG_THREAD}}",
   },
 

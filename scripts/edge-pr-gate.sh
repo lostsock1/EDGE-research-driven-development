@@ -153,6 +153,44 @@ def projects():
     return out
 
 
+# ---- the ONE gate thread -----------------------------------------------------
+# Every gate message (all projects' approval asks AND action confirmations) goes
+# to a single hub thread — the EDGE thread — so the operator has one place to
+# approve from and per-project chatter never buries a gate ask. Resolved from
+# env, else a `gate.env` next to the project configs (it has no RDD_REPO_DIR so
+# it is NOT picked up as a project), else the first project's thread (single-
+# project fallback keeps the template's one-thread setup working).
+
+def hub_dest():
+    env = {}
+    hub_file = CFG_DIR / "gate.env"
+    if hub_file.exists():
+        env = parse_env_file(hub_file)
+
+    def pick(key):
+        return os.environ.get(key) or env.get(key)
+
+    channel = pick("RDD_GATE_TG_CHANNEL")
+    target = pick("RDD_GATE_TG_TARGET")
+    thread = pick("RDD_GATE_TG_THREAD")
+    openclaw = pick("RDD_OPENCLAW")
+    if not target:  # fallback: first project that has a chat target
+        for p in projects():
+            if p["target"]:
+                channel = channel or p["channel"]
+                target = target or p["target"]
+                thread = thread if thread is not None else p["thread"]
+                openclaw = openclaw or p["openclaw"]
+                break
+    return {
+        "label": "gate-hub",
+        "channel": channel or "telegram",
+        "target": target or "",
+        "thread": thread or "",
+        "openclaw": openclaw or str(HOME / ".local/bin/openclaw"),
+    }
+
+
 # ---- state -------------------------------------------------------------------
 
 def load_state():
@@ -184,16 +222,18 @@ class Locked:
 
 # ---- chat delivery -------------------------------------------------------------
 
-def send_message(proj, text, buttons=None, dry=False):
-    """buttons: list of (label, callback_value). Returns True on success."""
-    if not proj["target"]:
-        log(f"NOTE {proj['label']}: no RDD_TG_TARGET — message not sent")
+def send_message(dest, text, buttons=None, dry=False):
+    """Send to a resolved dest dict (channel/target/thread/openclaw).
+    buttons: list of (label, callback_value). Returns True on success."""
+    if not dest["target"]:
+        log("NOTE gate hub has no target (set RDD_GATE_TG_TARGET or a project "
+            "RDD_TG_TARGET) — message not sent")
         return False
-    cmd = [proj["openclaw"], "message", "send",
-           "--channel", proj["channel"], "--target", proj["target"],
+    cmd = [dest["openclaw"], "message", "send",
+           "--channel", dest["channel"], "--target", dest["target"],
            "--message", text]
-    if proj["thread"]:
-        cmd += ["--thread-id", proj["thread"]]
+    if dest["thread"]:
+        cmd += ["--thread-id", dest["thread"]]
     if buttons:
         blocks = [{"type": "buttons",
                    "buttons": [{"label": lab,
@@ -201,15 +241,15 @@ def send_message(proj, text, buttons=None, dry=False):
                   for lab, val in buttons]
         cmd += ["--presentation", json.dumps({"blocks": blocks})]
     if dry:
-        print(f"  DRY-RUN send -> {proj['channel']}:{proj['target']}"
-              f"{':' + proj['thread'] if proj['thread'] else ''}")
+        print(f"  DRY-RUN send -> {dest['channel']}:{dest['target']}"
+              f"{':' + dest['thread'] if dest['thread'] else ''}")
         print("  " + text.replace("\n", "\n  "))
         for lab, val in (buttons or []):
             print(f"    [button] {lab}  ->  {val}")
         return True
     rc, out, err = run(cmd, timeout=30)
     if rc != 0:
-        log(f"SEND FAIL {proj['label']} rc={rc} {err[:200]}")
+        log(f"SEND FAIL hub rc={rc} {err[:200]}")
         return False
     return True
 
@@ -289,6 +329,56 @@ def gather(proj):
 
 # ---- sweep --------------------------------------------------------------------
 
+def action_explainer(a):
+    """The per-action human brief: What it does / Consequence / Why it's offered.
+    Plain text (no markdown emphasis — Telegram MarkdownV2 would choke on the
+    punctuation); one block per pending action, paired with its button below."""
+    trunk = a["trunk"]
+    if a["kind"] == "merge":
+        return (
+            f"▸ Merge PR #{a['pr']} — {a['title']}\n"
+            f"   What it does: squash-merges every commit on the PR into "
+            f"{trunk}, then deletes the source branch {a['branch']}.\n"
+            f"   Consequence: those changes become part of {trunk}, your "
+            f"shippable line — and if you deploy from {trunk} this is what "
+            f"reaches production. The PR closes and the branch is gone. "
+            f"Required CI checks are green right now, so nothing failing goes "
+            f"in; but CI only proves what it tests — a green check is not a "
+            f"substitute for you being happy with the change.\n"
+            f"   Why it's offered: the coder finished this work, opened the PR, "
+            f"and CI passed — it's sitting ready with nothing blocking it. When "
+            f"you approve I re-check, at that moment, that it is still open and "
+            f"still green; if CI has gone red since, I refuse rather than merge "
+            f"a stale approval.\n"
+            f"   Link: {a['url']}"
+        )
+    if a["kind"] == "prune":
+        reason = a.get("reason", "")
+        if "unmerged commit" in reason:
+            conseq = (
+                f"this branch has commits that are NOT in {trunk}. Deleting it "
+                f"discards that work permanently — there is no PR carrying it to "
+                f"safety. Only approve if you know this line of work is "
+                f"abandoned; if you're unsure, skip it and I'll ask again next "
+                f"sweep."
+            )
+        else:
+            conseq = (
+                f"its work already lives in {trunk} (or it never had any), so "
+                f"nothing is lost — this is pure housekeeping."
+            )
+        return (
+            f"▸ Delete branch {a['branch']}\n"
+            f"   What it does: permanently removes the branch {a['branch']} from "
+            f"GitHub.\n"
+            f"   Consequence: {conseq}\n"
+            f"   Why it's offered: {reason}. It is no longer the head of any open "
+            f"PR, so on the branch list it is just clutter. Removing it moves the "
+            f"repo toward the one-branch, trunk-only state you asked for."
+        )
+    return f"▸ {a.get('desc', a.get('kind', 'action'))}"
+
+
 def desired_actions(proj, facts):
     """key -> action template. Only things an operator can approve."""
     out = {}
@@ -318,6 +408,7 @@ def desired_actions(proj, facts):
 def sweep(dry=False):
     now = time.time()
     all_clean = True
+    dest = hub_dest()
     with Locked():
         state = load_state()
         for proj in projects():
@@ -388,17 +479,41 @@ def sweep(dry=False):
                 print(f"  (asked {h:.1f}h ago, unchanged — not re-posting; re-ask after {REASK_HOURS:.0f}h)")
                 continue
 
-            lines = [f"\U0001f6a6 {label} needs your call — {facts['slug']} (trunk {proj['trunk']})"]
-            for p in red:
-                lines.append(f"❌ PR #{p['number']} CI RED: {p['title'][:50]}")
-            for p in pend:
-                lines.append(f"⏳ PR #{p['number']} CI pending: {p['title'][:50]}")
-            lines.append("Tap to approve — I execute and confirm. "
-                         "(Or reply “approve” / react \U0001f44d to approve a single pending item.)")
-            buttons = [(a["button"], f"eg:{aid}") for aid, a in actions[:MAX_BUTTONS]]
+            shown = actions[:MAX_BUTTONS]
             overflow = actions[MAX_BUTTONS:]
+            lines = [
+                f"\U0001f6a6 {label} — GitHub gate needs your call",
+                f"Repo {facts['slug']}, trunk {proj['trunk']}. "
+                f"{len(shown)} item(s) below need a yes/no from you. I only ever "
+                f"act on your explicit approval — nothing merges or deletes until "
+                f"you tap.",
+                "",
+            ]
+            for aid, a in shown:
+                lines.append(action_explainer(a))
+                lines.append("")
+            if red or pend:
+                aware = []
+                for p in red:
+                    aware.append(f"   • PR #{p['number']} CI is RED — {p['title'][:50]} "
+                                 f"(I won't offer a red PR; it goes back through the coder loop)")
+                for p in pend:
+                    aware.append(f"   • PR #{p['number']} CI still running — {p['title'][:50]} "
+                                 f"(I'll offer it once it's green)")
+                lines.append("For your awareness (not actionable here):")
+                lines.extend(aware)
+                lines.append("")
             if overflow:
-                lines.append(f"+{len(overflow)} more pending — say “pending” to list them.")
+                lines.append(f"+{len(overflow)} more pending action(s) not shown as buttons "
+                             f"(button cap {MAX_BUTTONS}) — say “gate pending” to list them all.")
+                lines.append("")
+            lines.append(
+                "How to approve: tap the matching button below, or react \U0001f44d/✅ to "
+                "this message, or reply “approve” — for a single pending item I act it; "
+                "if several match I'll ask which. Not ready? Tap “Not now” to snooze this "
+                f"project's asks for {REASK_HOURS:.0f}h.")
+
+            buttons = [(a["button"], f"eg:{aid}") for aid, a in shown]
             for sid, sa in state["actions"].items():
                 if sa["label"] == label and sa["kind"] == "snooze" and sa["status"] == "pending":
                     sa["status"] = "superseded"
@@ -411,14 +526,15 @@ def sweep(dry=False):
                 "button": "⏸ Not now (snooze 24h)",
                 "status": "pending", "created": now,
             }
-            buttons.append(("⏸ Not now (snooze 24h)", f"eg:{snooze_id}"))
-            ok = send_message(proj, "\n".join(lines), buttons, dry=dry)
+            buttons.append((f"⏸ Not now (snooze {REASK_HOURS:.0f}h)", f"eg:{snooze_id}"))
+            ok = send_message(dest, "\n".join(lines), buttons, dry=dry)
             if ok and not dry:
                 state["posts"][label] = {"fingerprint": fp, "ts": now,
                                          "snoozed_until": post.get("snoozed_until", 0)}
-                print(f"  posted approval message ({len(buttons)} buttons) to "
-                      f"{proj['channel']} thread {proj['thread'] or '-'}")
-                log(f"POSTED {label} {len(actions)} action(s) fp={fp[:8]}")
+                print(f"  posted approval message ({len(buttons)} buttons) to gate hub "
+                      f"{dest['channel']} thread {dest['thread'] or '-'}")
+                log(f"POSTED {label} {len(actions)} action(s) fp={fp[:8]} -> hub "
+                    f"{dest['target']}:{dest['thread'] or '-'}")
         if not dry:
             save_state(state)
     if all_clean:
@@ -465,7 +581,7 @@ def act(aid):
     print(f"{prefix} {outcome}")
     if a["kind"] != "snooze":
         icon = "✅" if ok else "❌"
-        send_message(proj, f"{icon} gate: {outcome}")
+        send_message(hub_dest(), f"{icon} gate: {outcome}")
     sys.exit(0 if ok else 5)
 
 

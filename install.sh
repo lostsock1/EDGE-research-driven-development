@@ -106,6 +106,20 @@ if [ "$APPLY" = 1 ]; then
   install -m 0755 scripts/edge-pr-gate.sh "$RDD_HOME/.openclaw/shared-scripts/edge-pr-gate.sh"
   echo "installed: $RDD_HOME/.openclaw/shared-scripts/edge-pr-gate.sh"
 
+  # 2c. gate.env — the ONE thread every gate approval ask posts to. Has no
+  # RDD_REPO_DIR, so the sweep never treats it as a project. Defaults to this
+  # project's thread when the RDD_GATE_TG_* vars are left unset.
+  mkdir -p "$HOME/.config/edge-rdd"
+  backup "$HOME/.config/edge-rdd/gate.env"
+  {
+    echo "# EDGE PR gate — the single hub thread every gate message posts to."
+    echo "# Written by install.sh from template.env. Edit here to re-point the gate."
+    echo "RDD_GATE_TG_CHANNEL=${RDD_GATE_TG_CHANNEL:-${RDD_TG_CHANNEL:-telegram}}"
+    echo "RDD_GATE_TG_TARGET=${RDD_GATE_TG_TARGET:-${RDD_TG_TARGET:-}}"
+    echo "RDD_GATE_TG_THREAD=${RDD_GATE_TG_THREAD:-${RDD_TG_THREAD:-}}"
+  } > "$HOME/.config/edge-rdd/gate.env"
+  echo "installed: ~/.config/edge-rdd/gate.env (gate hub thread)"
+
   # 3. opencode agents
   mkdir -p "$RDD_HOME/.config/opencode/agents/code-monkeys"
   for f in rendered/opencode/agents/code-monkeys/*; do
