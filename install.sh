@@ -159,20 +159,57 @@ if [ "$APPLY" = 1 ]; then
     echo "kept existing: $SA (diff against rendered/ manually)"
   fi
 
-  # 4d. North-star spec prompt template — the method file the operator uses to
-  # generate a project's north-star specification at kickoff. Refresh with backup.
+  # 4d. Obsidian/note templates — the full set from workspace-edge/templates/.
+  # Refresh all of them with backup (templates should stay current).
   mkdir -p "$WS/templates"
-  backup "$WS/templates/north-star-spec.md"
-  cp rendered/workspace-edge/templates/north-star-spec.md "$WS/templates/north-star-spec.md"
-  echo "installed: north-star spec template -> $WS/templates/north-star-spec.md"
+  for tf in rendered/workspace-edge/templates/*; do
+    backup "$WS/templates/$(basename "$tf")"
+    cp "$tf" "$WS/templates/"
+    echo "installed: template $(basename "$tf") -> $WS/templates/"
+  done
 
-  # 4e. HEARTBEAT.md — the PR gate's 6h sweep task. Seed once; the operator
-  # tunes intervals/tasks in place afterwards, so never overwrite a live one.
+  # 4e. HEARTBEAT.md — status/notes file (gate sweeps are cron-scheduled, not
+  # heartbeat-driven). Seed once; the operator tunes it in place, so never
+  # overwrite a live one.
   if [ ! -f "$WS/HEARTBEAT.md" ]; then
     cp rendered/workspace-edge/HEARTBEAT.md "$WS/HEARTBEAT.md"
-    echo "installed: HEARTBEAT.md -> $WS/HEARTBEAT.md (PR-gate sweep every 6h)"
+    echo "installed: HEARTBEAT.md -> $WS/HEARTBEAT.md"
   else
     echo "kept existing: $WS/HEARTBEAT.md (diff against rendered/ manually)"
+  fi
+
+  # 4f. AGENTS.md — comprehensive workspace guide. Seed once; never overwrite
+  # a live one (the operator customises project list etc. in place).
+  if [ ! -f "$WS/AGENTS.md" ]; then
+    cp rendered/workspace-edge/AGENTS.md "$WS/AGENTS.md"
+    echo "installed: AGENTS.md -> $WS/AGENTS.md"
+  else
+    echo "kept existing: $WS/AGENTS.md (diff against rendered/ manually)"
+  fi
+
+  # 4g. IDENTITY.md — stable agent identity card. Seed once; never overwrite.
+  if [ ! -f "$WS/IDENTITY.md" ]; then
+    cp rendered/workspace-edge/IDENTITY.md "$WS/IDENTITY.md"
+    echo "installed: IDENTITY.md -> $WS/IDENTITY.md"
+  else
+    echo "kept existing: $WS/IDENTITY.md (diff against rendered/ manually)"
+  fi
+
+  # 4h. SKILL-REGISTRY.md — skill tracking framework. Seed once; never overwrite
+  # (the operator adds book skills and project assignments in place).
+  if [ ! -f "$WS/SKILL-REGISTRY.md" ]; then
+    cp rendered/workspace-edge/SKILL-REGISTRY.md "$WS/SKILL-REGISTRY.md"
+    echo "installed: SKILL-REGISTRY.md -> $WS/SKILL-REGISTRY.md"
+  else
+    echo "kept existing: $WS/SKILL-REGISTRY.md (diff against rendered/ manually)"
+  fi
+
+  # 4i. PERSONA.md — non-loaded marker copy of the active persona (SOUL.md is
+  # the file OpenClaw bootstraps). Always regenerate to match SOUL.md.
+  if [ -f "$WS/SOUL.md" ]; then
+    backup "$WS/PERSONA.md"
+    cp "$WS/SOUL.md" "$WS/PERSONA.md"
+    echo "regenerated: PERSONA.md <- $WS/SOUL.md (active persona marker)"
   fi
 
   # 4b. persona library + SOUL.md (the agent's operating philosophy).
