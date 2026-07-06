@@ -1,0 +1,3 @@
+[submodule "workspace-edge/EDGE"]
+	path = workspace-edge/EDGE
+	url = https://github.com/lostsock1/EDGE.git
