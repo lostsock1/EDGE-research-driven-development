@@ -15,6 +15,26 @@ you (Telegram) ──"go"──▶ EDGE ──dispatch──▶ wrapper ──ti
 
 This template is extracted from a production setup running commercial-grade software development through this exact loop. Every guard in it exists because the unguarded version failed at least once.
 
+## Workspace-first design
+
+Everything lives in a single workspace directory (`~/.openclaw/workspace-${AGENT_ID}/`):
+
+```
+~/.openclaw/workspace-edge/
+├── SOUL.md, AGENTS.md, HEARTBEAT.md, ...    (workspace docs)
+├── personas/                                (FRONTIER, AGAINST, INFINITY, BAYESIAN)
+├── templates/                               (north-star-spec.md, etc.)
+├── projects/<slug>/                         (git clone of project repo)
+├── context/<slug>/notes/                    (EDGE research context)
+├── config/edge-rdd/<slug>.env               (dispatch config)
+├── config/edge-rdd/gate.env                 (PR gate hub)
+├── config/opencode/agents/code-monkeys/     (coder, reviewer, _shared)
+├── skills/gate/SKILL.md                     (/gate command)
+└── scripts/edge-{coder-run,pr-gate}.sh      (dispatch scripts)
+```
+
+System paths (`~/.config/edge-rdd`, `~/.openclaw/skills/gate`, etc.) are symlinked to the workspace, so the runtime finds them without special configuration. **Single source of truth, easy backup, easy migration.**
+
 ## What's in the box
 
 | Piece | File(s) | What it does |
@@ -29,7 +49,7 @@ This template is extracted from a production setup running commercial-grade soft
 | **Repo handoff docs** | `project-repo/docs/agent/` | The git-tracked protocol both sides read: `PROJECT_STATE` · `TASKS` · `QUALITY_GATES` · `KNOWLEDGE_STAGING` · `RESEARCH_TRANSFER` · `EDGE_COLLABORATION` |
 | **GitHub gate** | `github/protect-branch.sh`, `project-repo/.github/workflows/ci.yml.example` | One-command branch protection (required checks, up-to-date branch, no force-push, admins included, 0 approvals — *you* are the approval) |
 | **PR gate** | `scripts/edge-pr-gate.sh`, `workspace-edge/HEARTBEAT.md` | Every 6h a heartbeat sweep checks every project repo — green PRs, CI verdicts, stray branches — and posts **one-tap approval buttons** (per item, plus **Do-all**), each with a what/consequence/why brief, into **one gate thread**. You tap ✅ (or react 👍, or type `/gate`), the agent re-verifies and executes the merge / branch cleanup, and every repo converges back to **trunk-only**. See [The PR gate](#the-pr-gate-approve-merges-with-one-tap) |
-| **Installer** | `install.sh`, `template.env.example` | Fill one env file, render, review, `--apply` with automatic backups |
+| **Installer** | `install.sh`, `uninstall.sh`, `template.env.example` | Workspace-first install: creates `~/.openclaw/workspace-${AGENT_ID}/`, clones project repo, creates symlinks, generates `<slug>.env` config. Uninstall with `--purge` (keeps repos) or `--purge-all` (removes everything) |
 | **Thread bootstrap** | `scripts/kickoff.sh`, `messages/` | One-shot first-boot handshake: **preflights the GitHub connection** (gh auth, reachable repo, matching clone, protection), then posts the development-kickoff + pinnable **command palette** into the project thread |
 
 ## The five ideas that make it work
@@ -42,18 +62,18 @@ This template is extracted from a production setup running commercial-grade soft
 
 ## The PR gate: approve merges with one tap
 
-The loop ends at a human decision — but that decision shouldn't require opening GitHub. Every 6 hours (a task interval in `workspace-edge/HEARTBEAT.md`, riding OpenClaw's heartbeat), `scripts/edge-pr-gate.sh sweep` checks **every** configured project — projects are simply the `*.env` files in `~/.config/edge-rdd/`, the same ones the dispatch wrapper reads, so there is no second registry to drift — and for each repo looks at:
+The loop ends at a human decision — but that decision shouldn't require opening GitHub. Every 6 hours (a task interval in `workspace-edge/HEARTBEAT.md`, riding OpenClaw's heartbeat), `scripts/edge-pr-gate.sh sweep` checks **every** configured project — projects are simply the `*.env` files in `~/.config/edge-rdd/` (symlinked to `workspace/config/edge-rdd/`), the same ones the dispatch wrapper reads, so there is no second registry to drift — and for each repo looks at:
 
 - **open PRs** and their CI verdict (green / red / pending / draft),
 - **every non-trunk branch**, classified: active PR head · leftover of a merged/closed PR · orphan with or without unique commits.
 
-Anything actionable — a green PR ready to merge, a stale branch to prune — becomes a **single-use pending action**, and the sweep posts one approval message per project into **one gate thread** (`RDD_GATE_TG_*` in `~/.config/edge-rdd/gate.env` — point it at your EDGE coordination thread so every project's asks land in one place instead of scattered across per-project threads). Each ask carries an inline button per action **and a plain-language brief: what the action does, its consequence, and why it's being offered** — so you're never approving a bare button. A snooze button rides along; unchanged asks are not re-posted for 24h; a clean project posts nothing. The declared goal is **trunk-only repos**: merged work in, dead branches gone.
+Anything actionable — a green PR ready to merge, a stale branch to prune — becomes a **single-use pending action**, and the sweep posts one approval message per project into **one gate thread** (`RDD_GATE_TG_*` in `workspace/config/edge-rdd/gate.env` — point it at your EDGE coordination thread so every project's asks land in one place instead of scattered across per-project threads). Each ask carries an inline button per action **and a plain-language brief: what the action does, its consequence, and why it's being offered** — so you're never approving a bare button. A snooze button rides along; unchanged asks are not re-posted for 24h; a clean project posts nothing. The declared goal is **trunk-only repos**: merged work in, dead branches gone.
 
 **Approving is one tap.** A button tap delivers its callback (`eg:<id>`) to the research agent, which runs `edge-pr-gate.sh act <id>`. A 👍/✅ reaction on the gate message — or replying "approve" — works too (`pending` resolves which action; if it's ambiguous the agent asks). `act` then **re-verifies at execution time** — PR still open, checks still green, branch still stale — and only then executes (`gh pr merge --squash --delete-branch`, or a remote branch delete), posts the outcome back, and burns the action id.
 
 **What did NOT change:** nothing merges without your explicit approval. The approval surface moved from the GitHub UI to a button in your chat; the executor moved from your thumb to the agent — *after* your tap. Actions are minted only by the sweep from observed repo state, are single-use, re-verify before executing (a stale button can never merge a PR whose CI went red), and the agent is under doctrine to never run `gh pr merge` or delete branches outside `act`. Red and pending-CI PRs are never offered as actions — they ride the normal `fix the red PR` loop.
 
-**Clear a whole project in one tap.** When a project has two or more pending items, the ask also carries a **“☑️ Do all N of the above”** button. Approving it runs every pending action for that project at once — each still independently re-verified before it executes, so a batch approval can never force through a PR that has since gone red.
+**Clear a whole project in one tap.** When a project has two or more pending items, the ask also carries a **"☑️ Do all N of the above"** button. Approving it runs every pending action for that project at once — each still independently re-verified before it executes, so a batch approval can never force through a PR that has since gone red.
 
 **Trigger it yourself with `/gate`.** The gate ships as a slash command (the `gate` skill): `/gate` (or `/gate sweep`) runs a sweep now, `/gate pending` lists open asks, `/gate status` shows recent results, `/gate act <id>` executes an approved action. Plain `gate sweep` / `gate pending` phrasing works too. Dry-run everything with `edge-pr-gate.sh sweep --dry-run`.
 
@@ -89,13 +109,27 @@ Three alternates ship alongside (AGAINST · INFINITY · BAYESIAN — see `worksp
 ## Quickstart
 
 ```bash
+# 1. Clone template
 git clone https://github.com/lostsock1/EDGE-evidence-driven-git-engineering
 cd EDGE-evidence-driven-git-engineering
-cp template.env.example template.env && $EDITOR template.env
-./install.sh              # render only — review ./rendered/
-./install.sh --apply      # install with automatic backups
-bash scripts/kickoff.sh   # after the GitHub steps — verifies the repo connection,
-                          # then posts the kickoff + pinnable command palette
+
+# 2. Configure
+cp template.env.example template.env
+$EDITOR template.env
+
+# 3. Render (safe, review)
+./install.sh
+
+# 4. Apply (creates workspace, symlinks, clones repo)
+./install.sh --apply
+
+# 5. Manual steps (printed by install.sh)
+# - Merge rendered/openclaw/agent.edge.json5 into ~/.openclaw/openclaw.json
+# - Merge rendered/openclaw/topic.project-thread.json5 into Telegram topics
+# - openclaw config validate && systemctl --user restart openclaw-gateway
+# - Copy CI workflow into project repo
+# - bash github/protect-branch.sh
+# - bash scripts/kickoff.sh
 ```
 
 Then follow **[docs/SETUP.md](docs/SETUP.md)** for the OpenClaw merge, CI, branch protection, and the smoke test. Read **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the why behind every design decision, and **[docs/OPERATIONS.md](docs/OPERATIONS.md)** for daily driving and troubleshooting.
@@ -103,6 +137,31 @@ Then follow **[docs/SETUP.md](docs/SETUP.md)** for the OpenClaw merge, CI, branc
 ### Requirements
 
 Linux server · [OpenClaw](https://docs.openclaw.ai) gateway with a Telegram channel · [opencode](https://opencode.ai) with keys for ≥2 coder models · `gh` CLI authed on the project repo · `flock`, `setsid`, `jq`, `python3`.
+
+### Adding a second project
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/you/newproject ~/.openclaw/workspace-edge/projects/newproject
+
+# 2. Create dispatch config
+cp ~/.openclaw/workspace-edge/config/edge-rdd/rag.env \
+   ~/.openclaw/workspace-edge/config/edge-rdd/newproject.env
+# Edit: RDD_REPO_DIR, RDD_TG_THREAD, RDD_DOCS_DIR, RDD_MAIN_BRANCH
+
+# 3. Create notes directory
+mkdir -p ~/.openclaw/workspace-edge/context/newproject/notes/
+
+# Gate picks it up automatically (scans config/edge-rdd/*.env)
+```
+
+### Uninstalling
+
+```bash
+./uninstall.sh              # remove symlinks only (safe, reversible)
+./uninstall.sh --purge      # remove workspace too (keeps project repos)
+./uninstall.sh --purge-all  # remove everything including project repos
+```
 
 ## Daily driving
 
