@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
-# install.sh — render the EDGE template with your values and (optionally)
-# install the results into place.
+# install.sh — workspace-first EDGE scaffolding.
 #
 #   ./install.sh            render only  -> ./rendered/   (safe, idempotent)
-#   ./install.sh --apply    render, then copy into live locations with backups
+#   ./install.sh --apply    render, then install into ~/.openclaw/workspace-edge/
 #
-# Rendering: every RDD_FOO=bar in template.env replaces the {{FOO}} token in
-# the markdown/json5 templates. scripts/ is copied verbatim (it reads the same
-# config at runtime instead). The two openclaw/*.json5 snippets are NEVER
-# auto-merged into openclaw.json — that's a manual, reviewed step.
+# Workspace-first: everything canonical lives inside ~/.openclaw/workspace-${RDD_AGENT_ID}/.
+# System paths (~/.config/edge-rdd, ~/.openclaw/skills/gate, etc.) are symlinked
+# to the workspace so the runtime finds them without special configuration.
+#
+# Structure after --apply:
+#   ~/.openclaw/workspace-${AGENT_ID}/
+#   ├── SOUL.md, AGENTS.md, HEARTBEAT.md, ...     (workspace docs)
+#   ├── personas/                                  (FRONTIER, etc.)
+#   ├── templates/                                 (north-star-spec.md, etc.)
+#   ├── projects/<slug>/                           (git clone of project repo)
+#   ├── context/<slug>/notes/                      (EDGE research context)
+#   ├── config/edge-rdd/<slug>.env                 (dispatch config)
+#   ├── config/edge-rdd/gate.env                   (PR gate hub)
+#   ├── config/opencode/agents/code-monkeys/       (coder, reviewer, _shared)
+#   ├── skills/gate/SKILL.md                       (/gate command)
+#   └── scripts/edge-{coder-run,pr-gate}.sh        (dispatch scripts)
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -22,22 +33,43 @@ fi
 
 # shellcheck disable=SC1090
 . "./$ENV_FILE"
-if [ -z "${RDD_HOME:-}" ] || [ "${RDD_HOME}" = "/home/youruser" ]; then
-  echo "install: RDD_HOME in template.env is unset or still the placeholder — edit template.env first." >&2
-  exit 2
-fi
+
+# Validate required vars
+for var in RDD_AGENT_ID RDD_AGENT_NAME RDD_PROJECT_NAME RDD_PROJECT_SLUG RDD_REPO_URL RDD_REPO_SLUG; do
+  if [ -z "${!var:-}" ]; then
+    echo "install: $var is required in template.env" >&2
+    exit 2
+  fi
+done
+
+# Derive paths
+WORKSPACE="$HOME/.openclaw/workspace-${RDD_AGENT_ID}"
+REPO_DIR="$WORKSPACE/projects/${RDD_PROJECT_SLUG}"
+CONFIG_DIR="$WORKSPACE/config/edge-rdd"
+STATE_DIR="$HOME/.local/state/edge-rdd"
 
 APPLY=0
 [ "${1:-}" = "--apply" ] && APPLY=1
 
+# ---- RENDER ----------------------------------------------------------------
 rm -rf rendered
 mkdir -p rendered
+
+# Inject derived vars for template rendering
+export RDD_HOME="$HOME"
+export RDD_REPO_DIR="$REPO_DIR"
+export RDD_WORKSPACE="$WORKSPACE"
+export RDD_LOG="$STATE_DIR/edge-coder-run.log"
+export RDD_RUNS_DIR="$STATE_DIR/runs"
+export RDD_LOCKDIR="$STATE_DIR/locks"
 
 python3 - "$ENV_FILE" <<'PY'
 import os, re, sys, pathlib
 
 env_file = sys.argv[1]
 tokens = {}
+
+# First pass: read template.env
 for line in open(env_file):
     line = line.strip()
     if not line or line.startswith("#") or "=" not in line:
@@ -47,11 +79,27 @@ for line in open(env_file):
     if k.startswith("RDD_"):
         tokens[k[4:]] = v
 
+# Second pass: inject derived vars
+home = os.environ.get("HOME", "")
+tokens["HOME"] = home
+tokens["WORKSPACE"] = f"{home}/.openclaw/workspace-{tokens.get('AGENT_ID', 'edge')}"
+tokens["REPO_DIR"] = f"{tokens['WORKSPACE']}/projects/{tokens.get('PROJECT_SLUG', 'myproject')}"
+tokens["LOG"] = f"{home}/.local/state/edge-rdd/edge-coder-run.log"
+tokens["RUNS_DIR"] = f"{home}/.local/state/edge-rdd/runs"
+tokens["LOCKDIR"] = f"{home}/.local/state/edge-rdd/locks"
+
+# Expand ~ in paths
+for k in ["OPENCODE", "OPENCLAW", "PATH_PREPEND"]:
+    if k in tokens:
+        tokens[k] = tokens[k].replace("~", home)
+
 render_dirs = ["opencode", "openclaw", "workspace-edge", "project-repo"]
 token_re = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
 missing = set()
 
 for d in render_dirs:
+    if not pathlib.Path(d).exists():
+        continue
     for src in pathlib.Path(d).rglob("*"):
         if not src.is_file():
             continue
@@ -78,179 +126,217 @@ PY
 
 echo "Rendered tree: ./rendered/"
 
-backup() { # backup <path> — timestamped copy next to the backups dir
-  local f="$1"
-  [ -f "$f" ] || return 0
-  local bdir="$HOME/.config/edge-rdd/backups"
-  mkdir -p "$bdir"
-  cp "$f" "$bdir/$(basename "$f").$(date +%Y%m%d_%H%M%S)"
+if [ "$APPLY" != "1" ]; then
+  exit 0
+fi
+
+# ---- APPLY -----------------------------------------------------------------
+echo "--- applying workspace-first install ---"
+echo "Workspace: $WORKSPACE"
+
+# Helper: create symlink idempotently
+symlink() { # symlink <target> <link>
+  local target="$1" link="$2"
+  if [ -L "$link" ]; then
+    local current
+    current=$(readlink "$link")
+    if [ "$current" = "$target" ]; then
+      return 0  # already correct
+    fi
+    rm "$link"
+  elif [ -e "$link" ]; then
+    # Back up existing file/dir
+    local backup="${link}.bak.$(date +%Y%m%d_%H%M%S)"
+    mv "$link" "$backup"
+    echo "  backed up: $link -> $backup"
+  fi
+  ln -s "$target" "$link"
 }
 
-if [ "$APPLY" = 1 ]; then
-  echo "--- applying ---"
+# 1. Create workspace structure
+mkdir -p "$WORKSPACE"/{projects,context,config/edge-rdd,config/opencode/agents,skills,scripts}
+mkdir -p "$WORKSPACE/context/${RDD_PROJECT_SLUG}/notes"
+mkdir -p "$STATE_DIR"/{runs,locks,pr-gate}
 
-  # 1. runtime config for the wrapper
-  mkdir -p "$HOME/.config/edge-rdd"
-  backup "$HOME/.config/edge-rdd/config.env"
-  cp "$ENV_FILE" "$HOME/.config/edge-rdd/config.env"
-  echo "installed: ~/.config/edge-rdd/config.env"
-
-  # 2. dispatch wrapper (verbatim — reads config at runtime)
-  mkdir -p "$RDD_HOME/.openclaw/shared-scripts"
-  backup "$RDD_HOME/.openclaw/shared-scripts/edge-coder-run.sh"
-  install -m 0755 scripts/edge-coder-run.sh "$RDD_HOME/.openclaw/shared-scripts/edge-coder-run.sh"
-  echo "installed: $RDD_HOME/.openclaw/shared-scripts/edge-coder-run.sh"
-
-  # 2b. PR gate (verbatim — discovers projects from ~/.config/edge-rdd/*.env)
-  backup "$RDD_HOME/.openclaw/shared-scripts/edge-pr-gate.sh"
-  install -m 0755 scripts/edge-pr-gate.sh "$RDD_HOME/.openclaw/shared-scripts/edge-pr-gate.sh"
-  echo "installed: $RDD_HOME/.openclaw/shared-scripts/edge-pr-gate.sh"
-
-  # 2c. gate.env — the ONE thread every gate approval ask posts to. Has no
-  # RDD_REPO_DIR, so the sweep never treats it as a project. Defaults to this
-  # project's thread when the RDD_GATE_TG_* vars are left unset.
-  mkdir -p "$HOME/.config/edge-rdd"
-  backup "$HOME/.config/edge-rdd/gate.env"
-  {
-    echo "# EDGE PR gate — the single hub thread every gate message posts to."
-    echo "# Written by install.sh from template.env. Edit here to re-point the gate."
-    echo "RDD_GATE_TG_CHANNEL=${RDD_GATE_TG_CHANNEL:-${RDD_TG_CHANNEL:-telegram}}"
-    echo "RDD_GATE_TG_TARGET=${RDD_GATE_TG_TARGET:-${RDD_TG_TARGET:-}}"
-    echo "RDD_GATE_TG_THREAD=${RDD_GATE_TG_THREAD:-${RDD_TG_THREAD:-}}"
-  } > "$HOME/.config/edge-rdd/gate.env"
-  echo "installed: ~/.config/edge-rdd/gate.env (gate hub thread)"
-
-  # 2d. gate skill — registers the /gate slash command (and /skill gate).
-  mkdir -p "$RDD_HOME/.openclaw/skills/gate"
-  backup "$RDD_HOME/.openclaw/skills/gate/SKILL.md"
-  cp rendered/openclaw/skills/gate/SKILL.md "$RDD_HOME/.openclaw/skills/gate/SKILL.md"
-  echo "installed: ~/.openclaw/skills/gate/SKILL.md (/gate command)"
-
-  # 3. opencode agents
-  mkdir -p "$RDD_HOME/.config/opencode/agents/code-monkeys"
-  for f in rendered/opencode/agents/code-monkeys/*; do
-    backup "$RDD_HOME/.config/opencode/agents/code-monkeys/$(basename "$f")"
-    cp "$f" "$RDD_HOME/.config/opencode/agents/code-monkeys/"
-  done
-  echo "installed: opencode agents -> ~/.config/opencode/agents/code-monkeys/"
-
-  # 4. research-agent workspace files
-  WS="$RDD_HOME/.openclaw/workspace-${RDD_AGENT_ID}"
-  mkdir -p "$WS/projects/${RDD_PROJECT_SLUG}"
-  backup "$WS/USER.md"
-  cp rendered/workspace-edge/USER.md "$WS/USER.md"
-  for wf in PROJECT.md RESUME.md; do
-    if [ ! -f "$WS/projects/${RDD_PROJECT_SLUG}/$wf" ]; then
-      cp "rendered/workspace-edge/$wf" "$WS/projects/${RDD_PROJECT_SLUG}/$wf"
-      echo "installed: $wf -> $WS/projects/${RDD_PROJECT_SLUG}/$wf"
+# 2. Workspace docs (SOUL.md, AGENTS.md, etc.)
+for f in AGENTS.md HEARTBEAT.md IDENTITY.md SKILL-REGISTRY.md USER.md; do
+  if [ -f "rendered/workspace-edge/$f" ]; then
+    if [ ! -f "$WORKSPACE/$f" ]; then
+      cp "rendered/workspace-edge/$f" "$WORKSPACE/$f"
+      echo "  installed: $f"
     else
-      echo "kept existing: $WS/projects/${RDD_PROJECT_SLUG}/$wf (diff against rendered/ manually)"
+      echo "  kept existing: $f"
     fi
-  done
-  mkdir -p "$WS/projects/${RDD_PROJECT_SLUG}/notes"
-
-  # 4c. Superior Architecture — the north-star research-track doc. Created once
-  # per project, then maintained by the research agent. Never overwrite a live one.
-  SA="$WS/projects/${RDD_PROJECT_SLUG}/notes/SUPERIOR_ARCHITECTURE.md"
-  if [ ! -f "$SA" ]; then
-    cp rendered/workspace-edge/SUPERIOR_ARCHITECTURE.md "$SA"
-    echo "installed: SUPERIOR_ARCHITECTURE.md -> $SA"
-  else
-    echo "kept existing: $SA (diff against rendered/ manually)"
   fi
+done
 
-  # 4d. Obsidian/note templates — the full set from workspace-edge/templates/.
-  # Refresh all of them with backup (templates should stay current).
-  mkdir -p "$WS/templates"
-  for tf in rendered/workspace-edge/templates/*; do
-    backup "$WS/templates/$(basename "$tf")"
-    cp "$tf" "$WS/templates/"
-    echo "installed: template $(basename "$tf") -> $WS/templates/"
-  done
-
-  # 4e. HEARTBEAT.md — status/notes file (gate sweeps are cron-scheduled, not
-  # heartbeat-driven). Seed once; the operator tunes it in place, so never
-  # overwrite a live one.
-  if [ ! -f "$WS/HEARTBEAT.md" ]; then
-    cp rendered/workspace-edge/HEARTBEAT.md "$WS/HEARTBEAT.md"
-    echo "installed: HEARTBEAT.md -> $WS/HEARTBEAT.md"
-  else
-    echo "kept existing: $WS/HEARTBEAT.md (diff against rendered/ manually)"
-  fi
-
-  # 4f. AGENTS.md — comprehensive workspace guide. Seed once; never overwrite
-  # a live one (the operator customises project list etc. in place).
-  if [ ! -f "$WS/AGENTS.md" ]; then
-    cp rendered/workspace-edge/AGENTS.md "$WS/AGENTS.md"
-    echo "installed: AGENTS.md -> $WS/AGENTS.md"
-  else
-    echo "kept existing: $WS/AGENTS.md (diff against rendered/ manually)"
-  fi
-
-  # 4g. IDENTITY.md — stable agent identity card. Seed once; never overwrite.
-  if [ ! -f "$WS/IDENTITY.md" ]; then
-    cp rendered/workspace-edge/IDENTITY.md "$WS/IDENTITY.md"
-    echo "installed: IDENTITY.md -> $WS/IDENTITY.md"
-  else
-    echo "kept existing: $WS/IDENTITY.md (diff against rendered/ manually)"
-  fi
-
-  # 4h. SKILL-REGISTRY.md — skill tracking framework. Seed once; never overwrite
-  # (the operator adds book skills and project assignments in place).
-  if [ ! -f "$WS/SKILL-REGISTRY.md" ]; then
-    cp rendered/workspace-edge/SKILL-REGISTRY.md "$WS/SKILL-REGISTRY.md"
-    echo "installed: SKILL-REGISTRY.md -> $WS/SKILL-REGISTRY.md"
-  else
-    echo "kept existing: $WS/SKILL-REGISTRY.md (diff against rendered/ manually)"
-  fi
-
-  # 4i. PERSONA.md — non-loaded marker copy of the active persona (SOUL.md is
-  # the file OpenClaw bootstraps). Always regenerate to match SOUL.md.
-  if [ -f "$WS/SOUL.md" ]; then
-    backup "$WS/PERSONA.md"
-    cp "$WS/SOUL.md" "$WS/PERSONA.md"
-    echo "regenerated: PERSONA.md <- $WS/SOUL.md (active persona marker)"
-  fi
-
-  # 4b. persona library + SOUL.md (the agent's operating philosophy).
-  # SOUL.md is the OpenClaw-loaded bootstrap file; PERSONA.md is a non-loaded
-  # marker — see workspace-edge/personas/README.md. Never overwrite a live SOUL.md.
-  mkdir -p "$WS/personas"
-  cp rendered/workspace-edge/personas/* "$WS/personas/"
-  PERSONA="${RDD_PERSONA:-FRONTIER}"
-  if [ ! -f "$WS/SOUL.md" ]; then
-    if [ -f "$WS/personas/${PERSONA}.md" ]; then
-      cp "$WS/personas/${PERSONA}.md" "$WS/SOUL.md"
-      echo "installed: persona ${PERSONA} -> $WS/SOUL.md"
+# PROJECT.md and RESUME.md go into projects/<slug>/
+mkdir -p "$WORKSPACE/projects/${RDD_PROJECT_SLUG}"
+for f in PROJECT.md RESUME.md; do
+  if [ -f "rendered/workspace-edge/$f" ]; then
+    if [ ! -f "$WORKSPACE/projects/${RDD_PROJECT_SLUG}/$f" ]; then
+      cp "rendered/workspace-edge/$f" "$WORKSPACE/projects/${RDD_PROJECT_SLUG}/$f"
+      echo "  installed: projects/${RDD_PROJECT_SLUG}/$f"
     else
-      echo "WARNING: persona ${PERSONA} not found in $WS/personas/ — SOUL.md not seeded"
+      echo "  kept existing: projects/${RDD_PROJECT_SLUG}/$f"
     fi
-  else
-    echo "kept existing: $WS/SOUL.md (swap manually: cp $WS/personas/${PERSONA}.md $WS/SOUL.md)"
   fi
+done
 
-  # 5. project-repo handoff docs — only fill gaps, never overwrite live docs
-  if [ -d "${RDD_REPO_DIR:-/nonexistent}/.git" ]; then
-    mkdir -p "$RDD_REPO_DIR/$RDD_DOCS_DIR"
-    for f in rendered/project-repo/docs/agent/*; do
-      t="$RDD_REPO_DIR/$RDD_DOCS_DIR/$(basename "$f")"
-      if [ -f "$t" ]; then echo "kept existing: $t"; else cp "$f" "$t"; echo "seeded: $t"; fi
-    done
+# SUPERIOR_ARCHITECTURE.md goes into projects/<slug>/notes/
+if [ -f "rendered/workspace-edge/SUPERIOR_ARCHITECTURE.md" ]; then
+  if [ ! -f "$WORKSPACE/projects/${RDD_PROJECT_SLUG}/notes/SUPERIOR_ARCHITECTURE.md" ]; then
+    cp "rendered/workspace-edge/SUPERIOR_ARCHITECTURE.md" "$WORKSPACE/projects/${RDD_PROJECT_SLUG}/notes/SUPERIOR_ARCHITECTURE.md"
+    echo "  installed: projects/${RDD_PROJECT_SLUG}/notes/SUPERIOR_ARCHITECTURE.md"
   else
-    echo "SKIPPED repo docs: RDD_REPO_DIR ($RDD_REPO_DIR) is not a git repo — seed them after cloning."
+    echo "  kept existing: projects/${RDD_PROJECT_SLUG}/notes/SUPERIOR_ARCHITECTURE.md"
   fi
-
-  echo ""
-  echo "=== MANUAL STEPS REMAINING (never automated) ==="
-  echo "1. Merge rendered/openclaw/agent.edge.json5 into agents.list[] in ~/.openclaw/openclaw.json"
-  echo "   (its skills[] includes \"gate\" — keep it so /gate works; the list is an allowlist)"
-  echo "2. Merge rendered/openclaw/topic.project-thread.json5 into your Telegram group's topics map"
-  echo "3. openclaw config validate && systemctl --user restart openclaw-gateway"
-  echo "4. Copy project-repo/.github/workflows/ci.yml.example into your repo as .github/workflows/ci.yml and adapt"
-  echo "5. bash github/protect-branch.sh   (after CI ran once so the check contexts exist)"
-  echo "6. Smoke test: bash $RDD_HOME/.openclaw/shared-scripts/edge-coder-run.sh status"
-  echo "   PR gate:    bash $RDD_HOME/.openclaw/shared-scripts/edge-pr-gate.sh sweep --dry-run"
-  echo "7. Kick off the thread: bash scripts/kickoff.sh (preflights the GitHub connection,"
-  echo "   then posts the development-kickoff + pinnable command-palette messages)"
-  echo "See docs/SETUP.md for the full walkthrough."
 fi
+
+# 3. Personas
+mkdir -p "$WORKSPACE/personas"
+if [ -d "rendered/workspace-edge/personas" ]; then
+  cp rendered/workspace-edge/personas/*.md "$WORKSPACE/personas/" 2>/dev/null || true
+  echo "  installed: personas/"
+fi
+
+# SOUL.md from active persona
+PERSONA="${RDD_PERSONA:-FRONTIER}"
+if [ ! -f "$WORKSPACE/SOUL.md" ] && [ -f "$WORKSPACE/personas/${PERSONA}.md" ]; then
+  cp "$WORKSPACE/personas/${PERSONA}.md" "$WORKSPACE/SOUL.md"
+  echo "  installed: SOUL.md (from $PERSONA)"
+fi
+
+# 4. Templates
+if [ -d "rendered/workspace-edge/templates" ]; then
+  mkdir -p "$WORKSPACE/templates"
+  cp rendered/workspace-edge/templates/* "$WORKSPACE/templates/" 2>/dev/null || true
+  echo "  installed: templates/"
+fi
+
+# 5. Scripts (workspace-edge/scripts/)
+for f in edge-coder-run.sh edge-pr-gate.sh; do
+  if [ -f "scripts/$f" ]; then
+    install -m 0755 "scripts/$f" "$WORKSPACE/scripts/$f"
+    echo "  installed: scripts/$f"
+  fi
+done
+
+# 6. Skills (workspace-edge/skills/gate/)
+if [ -d "rendered/openclaw/skills/gate" ]; then
+  mkdir -p "$WORKSPACE/skills/gate"
+  cp rendered/openclaw/skills/gate/SKILL.md "$WORKSPACE/skills/gate/SKILL.md"
+  echo "  installed: skills/gate/SKILL.md"
+fi
+
+# 7. Code-monkeys agents (workspace-edge/config/opencode/agents/code-monkeys/)
+if [ -d "rendered/opencode/agents/code-monkeys" ]; then
+  mkdir -p "$WORKSPACE/config/opencode/agents/code-monkeys"
+  for f in rendered/opencode/agents/code-monkeys/*; do
+    cp "$f" "$WORKSPACE/config/opencode/agents/code-monkeys/"
+  done
+  echo "  installed: config/opencode/agents/code-monkeys/"
+fi
+
+# 8. Dispatch config (workspace-edge/config/edge-rdd/<slug>.env)
+# Generate from template.env with derived paths
+cat > "$CONFIG_DIR/${RDD_PROJECT_SLUG}.env" <<CFGEOF
+# Project: $RDD_PROJECT_NAME — dispatch config
+# Generated by install.sh from template.env
+RDD_OPENCODE=$HOME/.opencode/bin/opencode
+RDD_OPENCLAW=$HOME/.local/bin/openclaw
+RDD_REPO_DIR=$REPO_DIR
+RDD_AGENT=${RDD_AGENT:-code-monkeys/coder}
+RDD_MAIN_BRANCH=${RDD_MAIN_BRANCH:-main}
+RDD_BRANCH_PREFIX=${RDD_BRANCH_PREFIX:-cm}
+RDD_DOCS_DIR=${RDD_DOCS_DIR:-docs/agent}
+RDD_TIMEOUTS_BG="${RDD_TIMEOUTS_BG:-3600}"
+RDD_TIMEOUTS_FG="${RDD_TIMEOUTS_FG:-1800}"
+RDD_LOG=$STATE_DIR/edge-coder-run.log
+RDD_RUNS_DIR=$STATE_DIR/runs
+RDD_LOCKDIR=$STATE_DIR/locks
+RDD_TG_CHANNEL=${RDD_TG_CHANNEL:-telegram}
+RDD_TG_TARGET=${RDD_TG_TARGET:-}
+RDD_TG_THREAD=${RDD_TG_THREAD:-}
+RDD_CI_POLL_SECS=${RDD_CI_POLL_SECS:-60}
+RDD_CI_POLL_MAX=${RDD_CI_POLL_MAX:-40}
+RDD_PATH_PREPEND=${RDD_PATH_PREPEND:-$HOME/.local/bin}
+RDD_MODELS="${RDD_MODELS:-openai/gpt-5.5 deepseek/deepseek-v4-pro}"
+CFGEOF
+echo "  installed: config/edge-rdd/${RDD_PROJECT_SLUG}.env"
+
+# 9. Gate config (workspace-edge/config/edge-rdd/gate.env)
+cat > "$CONFIG_DIR/gate.env" <<GATEEOF
+# EDGE PR gate — the single hub thread every gate message posts to.
+# Generated by install.sh from template.env.
+RDD_GATE_TG_CHANNEL=${RDD_GATE_TG_CHANNEL:-${RDD_TG_CHANNEL:-telegram}}
+RDD_GATE_TG_TARGET=${RDD_GATE_TG_TARGET:-${RDD_TG_TARGET:-}}
+RDD_GATE_TG_THREAD=${RDD_GATE_TG_THREAD:-${RDD_TG_THREAD:-}}
+GATEEOF
+echo "  installed: config/edge-rdd/gate.env"
+
+# 10. Clone project repo if not exists
+if [ ! -d "$REPO_DIR/.git" ]; then
+  echo "  cloning: $RDD_REPO_URL -> $REPO_DIR"
+  git clone "$RDD_REPO_URL" "$REPO_DIR"
+else
+  echo "  repo exists: $REPO_DIR"
+fi
+
+# 11. Seed handoff docs into project repo
+if [ -d "$REPO_DIR/.git" ]; then
+  mkdir -p "$REPO_DIR/${RDD_DOCS_DIR}"
+  for f in rendered/project-repo/docs/agent/*; do
+    if [ -f "$f" ]; then
+      target="$REPO_DIR/${RDD_DOCS_DIR}/$(basename "$f")"
+      if [ ! -f "$target" ]; then
+        cp "$f" "$target"
+        echo "  seeded: $target"
+      fi
+    fi
+  done
+fi
+
+# 12. Create symlinks
+echo ""
+echo "--- creating symlinks ---"
+
+# ~/.config/edge-rdd -> workspace/config/edge-rdd
+symlink "$CONFIG_DIR" "$HOME/.config/edge-rdd"
+echo "  symlink: ~/.config/edge-rdd -> workspace/config/edge-rdd"
+
+# ~/.openclaw/skills/gate -> workspace/skills/gate
+symlink "$WORKSPACE/skills/gate" "$HOME/.openclaw/skills/gate"
+echo "  symlink: ~/.openclaw/skills/gate -> workspace/skills/gate"
+
+# ~/.openclaw/shared-scripts/edge-*.sh -> workspace/scripts/edge-*.sh
+mkdir -p "$HOME/.openclaw/shared-scripts"
+for f in edge-coder-run.sh edge-pr-gate.sh; do
+  symlink "$WORKSPACE/scripts/$f" "$HOME/.openclaw/shared-scripts/$f"
+  echo "  symlink: ~/.openclaw/shared-scripts/$f -> workspace/scripts/$f"
+done
+
+# ~/.config/opencode/agents/code-monkeys -> workspace/config/opencode/agents/code-monkeys
+mkdir -p "$HOME/.config/opencode/agents"
+symlink "$WORKSPACE/config/opencode/agents/code-monkeys" "$HOME/.config/opencode/agents/code-monkeys"
+echo "  symlink: ~/.config/opencode/agents/code-monkeys -> workspace/config/opencode/agents/code-monkeys"
+
+echo ""
+echo "=== WORKSPACE-FIRST INSTALL COMPLETE ==="
+echo ""
+echo "Workspace: $WORKSPACE"
+echo "Project:   $REPO_DIR"
+echo "Config:    $CONFIG_DIR/${RDD_PROJECT_SLUG}.env"
+echo ""
+echo "=== MANUAL STEPS REMAINING ==="
+echo "1. Merge rendered/openclaw/agent.edge.json5 into agents.list[] in ~/.openclaw/openclaw.json"
+echo "   (its skills[] includes \"gate\" — keep it so /gate works)"
+echo "2. Merge rendered/openclaw/topic.project-thread.json5 into your Telegram group's topics map"
+echo "3. openclaw config validate && systemctl --user restart openclaw-gateway"
+echo "4. Copy project-repo/.github/workflows/ci.yml.example into your repo as .github/workflows/ci.yml"
+echo "5. bash github/protect-branch.sh (after CI ran once)"
+echo "6. Smoke test: bash $WORKSPACE/scripts/edge-coder-run.sh status"
+echo "   PR gate:    bash $WORKSPACE/scripts/edge-pr-gate.sh sweep --dry-run"
+echo "7. Kick off: bash scripts/kickoff.sh"
+echo ""
+echo "See docs/SETUP.md for the full walkthrough."

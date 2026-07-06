@@ -19,7 +19,7 @@
 #   status:           show lock holder + recent runs.
 #
 # CONFIGURATION — everything lives in a config file sourced at startup:
-#   $EDGE_RDD_CONFIG  >  ~/.config/edge-rdd/config.env  >  built-in defaults
+#   $EDGE_RDD_CONFIG  >  auto-detect first .env with RDD_REPO_DIR in ~/.config/edge-rdd/  >  built-in defaults
 # See template.env.example in the template repo for every knob.
 #
 # MODEL FALLBACK: opencode has NO native retry-on-429 and NO provider fallback —
@@ -58,7 +58,13 @@
 set -uo pipefail
 
 # ---- configuration --------------------------------------------------------
-CONFIG="${EDGE_RDD_CONFIG:-$HOME/.config/edge-rdd/config.env}"
+# Auto-detect config: scan for .env files with RDD_REPO_DIR if not explicit.
+if [ -z "${EDGE_RDD_CONFIG:-}" ]; then
+  for _f in "$HOME/.config/edge-rdd/"*.env; do
+    [ -f "$_f" ] && grep -q RDD_REPO_DIR "$_f" 2>/dev/null && { EDGE_RDD_CONFIG="$_f"; break; }
+  done
+fi
+CONFIG="${EDGE_RDD_CONFIG:-}"
 # shellcheck disable=SC1090
 [ -f "$CONFIG" ] && . "$CONFIG"
 
