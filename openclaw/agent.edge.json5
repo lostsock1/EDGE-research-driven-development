@@ -32,8 +32,8 @@
   skills: ["github", "gh-issues", "gate"],
   sandbox: { mode: "off" },
 
-  // Heartbeat — powers the PR gate's periodic GitHub sweep (the 6h task lives
-  // in workspace HEARTBEAT.md; ticks with no due task skip without an API call).
+  // Heartbeat — kept for future use; currently has no active tasks (the PR
+  // gate sweep runs on-demand via `/gate sweep`, not via heartbeat).
   // WARNING: the moment ANY agent defines a heartbeat block, agents WITHOUT one
   // stop running heartbeats. If other agents on this gateway rely on default
   // heartbeats, give each an explicit block too — `heartbeat: { every: "30m" }`

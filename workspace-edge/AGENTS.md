@@ -19,7 +19,7 @@
 - `projects/{{PROJECT_SLUG}}/` — ...
 
 ## Project kickoff: north-star track
-- New projects start with an operator **north-star specification**, generated via `06_TEMPLATES/North Star Spec.md` (full prompt, short variant, and technical/product/adversarial add-ons — usage header in the template).
+- New projects start with an operator **north-star specification**, generated via `templates/North Star Spec.md` (full prompt, short variant, and technical/product/adversarial add-ons — usage header in the template).
 - The spec lands verbatim at `projects/<project>/notes/<project>-north-star.md` (`status: unprocessed`); {{AGENT_NAME}} distills it into the charter Mission, then synthesizes `notes/SUPERIOR_ARCHITECTURE.md` from it.
 - Raw spec sections are never work orders. Promotion into a repo is gated through `KNOWLEDGE_STAGING.md` → `RESEARCH_TRANSFER.md` → `TASKS.md`; the spec and the north-star doc themselves never enter the repo.
 
