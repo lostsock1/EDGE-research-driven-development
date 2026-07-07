@@ -19,7 +19,7 @@
 #   status:           show lock holder + recent runs.
 #
 # CONFIGURATION — everything lives in a config file sourced at startup:
-#   $EDGE_RDD_CONFIG  >  ~/.config/edge-rdd/config.env  >  built-in defaults
+#   $EDGE_RDD_CONFIG  >  auto-detect first .env with RDD_REPO_DIR in ~/.config/edge-rdd/  >  built-in defaults
 # See template.env.example in the template repo for every knob.
 #
 # MODEL FALLBACK: opencode has NO native retry-on-429 and NO provider fallback —
@@ -56,9 +56,17 @@
 #         $RDD_RUNS_DIR/<id>.log  (full per-run output)
 
 set -uo pipefail
+# Source OpenClaw .env for API keys (alibaba-token-plan, etc.)
+[ -f "$HOME/.openclaw/.env" ] && source "$HOME/.openclaw/.env"
 
 # ---- configuration --------------------------------------------------------
-CONFIG="${EDGE_RDD_CONFIG:-$HOME/.config/edge-rdd/config.env}"
+# Auto-detect config: scan for .env files with RDD_REPO_DIR if not explicit.
+if [ -z "${EDGE_RDD_CONFIG:-}" ]; then
+  for _f in "$HOME/.config/edge-rdd/"*.env; do
+    [ -f "$_f" ] && grep -q RDD_REPO_DIR "$_f" 2>/dev/null && { EDGE_RDD_CONFIG="$_f"; break; }
+  done
+fi
+CONFIG="${EDGE_RDD_CONFIG:-}"
 # shellcheck disable=SC1090
 [ -f "$CONFIG" ] && . "$CONFIG"
 
@@ -69,7 +77,7 @@ AGENT=${RDD_AGENT:-code-monkeys/coder}
 MAIN_BRANCH=${RDD_MAIN_BRANCH:-main}
 BRANCH_PREFIX=${RDD_BRANCH_PREFIX:-cm}
 DOCS_DIR=${RDD_DOCS_DIR:-docs/agent}
-read -r -a MODELS      <<< "${RDD_MODELS:-openai/gpt-5.5 deepseek/deepseek-v4-pro}"
+read -r -a MODELS      <<< "${RDD_MODELS:-deepseek/deepseek-v4-pro}"
 read -r -a TIMEOUTS_BG <<< "${RDD_TIMEOUTS_BG:-3600 2400}"
 read -r -a TIMEOUTS_FG <<< "${RDD_TIMEOUTS_FG:-1800 1500}"
 LOG=${RDD_LOG:-$HOME/.local/state/edge-rdd/edge-coder-run.log}

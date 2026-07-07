@@ -68,8 +68,13 @@ set -uo pipefail
 # RDD_GATE_PATH_PREPEND, falling back to the default project config's
 # RDD_PATH_PREPEND — the dispatch wrapper's own mechanism for the same problem.
 GATE_CFG_DIR="${RDD_GATE_CONFIG_DIR:-$HOME/.config/edge-rdd}"
-if [ -z "${RDD_GATE_PATH_PREPEND:-}" ] && [ -f "$GATE_CFG_DIR/config.env" ]; then
-  RDD_GATE_PATH_PREPEND="$(sed -n 's/^RDD_PATH_PREPEND=//p' "$GATE_CFG_DIR/config.env" | tail -1 | tr -d '"'"'"'')"
+if [ -z "${RDD_GATE_PATH_PREPEND:-}" ]; then
+  for _f in "$GATE_CFG_DIR/"*.env; do
+    if [ -f "$_f" ] && grep -q RDD_PATH_PREPEND "$_f" 2>/dev/null; then
+      RDD_GATE_PATH_PREPEND="$(sed -n 's/^RDD_PATH_PREPEND=//p' "$_f" | tail -1 | tr -d '"'"'"'')"
+      break
+    fi
+  done
 fi
 [ -n "${RDD_GATE_PATH_PREPEND:-}" ] && export PATH="$RDD_GATE_PATH_PREPEND:$PATH"
 

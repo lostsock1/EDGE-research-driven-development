@@ -1,7 +1,7 @@
 ---
 description: Primary implementer and EDGE-facing front door for the code-monkeys team — builds code with tests, owns git and GitHub, and runs the research/feedback loop; hands architecture and research decisions back to the research agent
 mode: primary
-model: {{MODEL_CODER_T1}}
+model: deepseek/deepseek-v4-pro
 temperature: 0.1
 top_p: 0.2
 steps: 70
