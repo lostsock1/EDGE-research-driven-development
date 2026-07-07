@@ -17,6 +17,56 @@ Send these to the research agent in the project thread:
 
 The agent must always reply in the contract shape: plain-lingo summary → your options with tradeoffs → one recommendation with the why.
 
+## The gapped lab — running contained experiments
+
+EDGE's gapped lab runs experiments in ephemeral Docker containers. Every run requires a pre-registered protocol (`protocol.yaml`) with hypothesis, rival, and refutation_condition — the lab refuses to run without them.
+
+### Quick start
+
+```bash
+# Build the lab image (once, or after Dockerfile changes)
+lab/lab-run.sh --image
+
+# Create a new experiment from template
+lab/lab-run.sh --new my-hypothesis
+
+# Fill in lab/experiments/my-hypothesis/protocol.yaml and run.sh
+# Then run it:
+lab/lab-run.sh lab/experiments/my-hypothesis
+
+# List past experiments and their outcomes
+lab/lab-run.sh --list
+
+# Clean up old experiment artifacts
+lab/lab-run.sh --clean
+```
+
+### Container environment
+
+- Python 3.12 + numpy, pandas, scipy, scikit-learn, matplotlib, pytest, duckdb, pyarrow
+- System tools: git, curl, jq, yq, sqlite3, graphviz
+- Network: `none` by default (air-gapped). Set `LAB_NETWORK=bridge` if needed
+- Resources: bounded per run (default 2g memory, 2 CPUs, 600s timeout)
+- Mounts: experiment dir at `/lab/experiment/` (rw), workspace projects at `/lab/workspace/projects/` (ro)
+
+### Protocol enforcement
+
+Every experiment dir must contain `protocol.yaml` with at minimum:
+- `hypothesis` — the explanation under test
+- `rival` — the incompatible alternative
+- `refutation_condition` — the result that kills the hypothesis
+
+Create interactively: `lab/protocol.sh --new <slug>`
+
+### Configuration
+
+Override defaults via environment variables:
+```bash
+LAB_MEMORY=4g LAB_TIMEOUT=1200 LAB_NETWORK=bridge lab/lab-run.sh lab/experiments/my-test
+```
+
+See `lab/README.md` for full documentation.
+
 ## Reading the completion message
 
 ```

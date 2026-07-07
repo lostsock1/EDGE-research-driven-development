@@ -66,6 +66,18 @@ A **research agent** (EDGE, running in OpenClaw, driven from a Telegram thread) 
 
 **One dispatch at a time, per repo.** A per-repo `flock` refuses concurrent dispatches (with holder info), because two coders in one working tree corrupt each other's partial work. The CI watcher closes its inherited lock fd so the *next* dispatch isn't blocked while checks run.
 
+**Contained experiments in Docker, not the agent sandbox.** EDGE no longer runs experiments directly in its `exec` environment. Every experiment launches in an ephemeral Docker container via `lab/lab-run.sh` — fully air-gapped (`--network none`), resource-bounded (memory/CPU/timeout), mounted read/write only on the experiment directory, and auto-destroyed on completion (`--rm`). The container image (`edge-gapped-lab`) ships Python 3.12 + numpy/pandas/scipy/scikit-learn + git/curl/jq. The pre-registration protocol (hypothesis, rival, refutation_condition) is enforced mechanically — `lab-run.sh` refuses to run without a filled `protocol.yaml`. This turns the persona's "gapped lab" from a discipline into a mechanism. See `lab/README.md` for usage.
+
+## Experiment layers (three oracles)
+
+EDGE tests ideas through three separate oracles, ordered by the strength of evidence they provide:
+
+1. **Gapped lab** (`lab/lab-run.sh`) — EDGE designs the test. Ephemeral Docker container, pre-registered protocol, air-gapped, auto-destroyed. Weakest evidence (EDGE can shape the test) but cheapest and fastest.
+2. **Implementation oracle** (`edge-coder-run.sh`) — Reality designs the test. A coder agent implements the work order on a feature branch; the seam that wasn't there, the test that failed, the interface that didn't fit — these are refutations EDGE couldn't shape. Highest-grade evidence.
+3. **OpenScience** (`openscience-research.sh`) — External research sandbox. Read-only, no code execution. Feeds the research pool with mechanisms from papers and repos.
+
+A finding promotes: lab survival → implementation survival → merged and proven.
+
 ## Known traps (learned the hard way, guarded by the template)
 
 - A stray `.git` at `$HOME` makes opencode snapshot-walk the entire home directory and hang forever. The wrapper refuses to dispatch while it exists.

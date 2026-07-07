@@ -222,6 +222,18 @@ for f in edge-coder-run.sh edge-pr-gate.sh; do
   fi
 done
 
+# 5b. Lab (Docker-based gapped experiment lab)
+if [ -d "lab" ]; then
+  mkdir -p "$WORKSPACE/lab/experiments"
+  for f in lab/*; do
+    if [ -f "$f" ]; then
+      cp "$f" "$WORKSPACE/$f"
+    fi
+  done
+  chmod +x "$WORKSPACE"/lab/*.sh 2>/dev/null || true
+  echo "  installed: lab/ (Docker gapped lab — build image with: lab/lab-run.sh --image)"
+fi
+
 # 6. Skills (workspace-edge/skills/gate/)
 if [ -d "rendered/openclaw/skills/gate" ]; then
   mkdir -p "$WORKSPACE/skills/gate"
@@ -338,5 +350,6 @@ echo "5. bash github/protect-branch.sh (after CI ran once)"
 echo "6. Smoke test: bash $WORKSPACE/scripts/edge-coder-run.sh status"
 echo "   PR gate:    bash $WORKSPACE/scripts/edge-pr-gate.sh sweep --dry-run"
 echo "7. Kick off: bash scripts/kickoff.sh"
+echo "8. Build the gapped lab Docker image: cd $WORKSPACE && lab/lab-run.sh --image"
 echo ""
 echo "See docs/SETUP.md for the full walkthrough."

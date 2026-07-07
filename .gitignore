@@ -29,6 +29,9 @@ rendered/
 .env
 *.env
 
+# Lab experiment output (runtime state, never port)
+lab/experiments/
+
 # OS / editor
 .DS_Store
 *.swp
