@@ -75,7 +75,7 @@ AGENT=${RDD_AGENT:-code-monkeys/coder}
 MAIN_BRANCH=${RDD_MAIN_BRANCH:-main}
 BRANCH_PREFIX=${RDD_BRANCH_PREFIX:-cm}
 DOCS_DIR=${RDD_DOCS_DIR:-docs/agent}
-read -r -a MODELS      <<< "${RDD_MODELS:-openai/gpt-5.5 deepseek/deepseek-v4-pro}"
+read -r -a MODELS      <<< "${RDD_MODELS:-deepseek/deepseek-v4-pro}"
 read -r -a TIMEOUTS_BG <<< "${RDD_TIMEOUTS_BG:-3600 2400}"
 read -r -a TIMEOUTS_FG <<< "${RDD_TIMEOUTS_FG:-1800 1500}"
 LOG=${RDD_LOG:-$HOME/.local/state/edge-rdd/edge-coder-run.log}
