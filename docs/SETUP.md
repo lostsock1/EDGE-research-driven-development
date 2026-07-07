@@ -45,18 +45,24 @@ This installs (with timestamped backups under `~/.config/edge-rdd/backups/`):
 | opencode agents | `~/.config/opencode/agents/code-monkeys/` |
 | communication contract | `~/.openclaw/workspace-<agent>/USER.md` |
 | persona library + SOUL.md | `~/.openclaw/workspace-<agent>/personas/` (default `RDD_PERSONA=FRONTIER` seeded to `SOUL.md`; existing SOUL.md never overwritten) |
+| workspace guide | `~/.openclaw/workspace-<agent>/AGENTS.md` (seeded once, never overwritten) |
+| identity card | `~/.openclaw/workspace-<agent>/IDENTITY.md` (seeded once) |
+| skill registry | `~/.openclaw/workspace-<agent>/SKILL-REGISTRY.md` (seeded once) |
+| persona marker | `~/.openclaw/workspace-<agent>/PERSONA.md` (regenerated from SOUL.md on every apply) |
 | project charter | `~/.openclaw/workspace-<agent>/projects/<slug>/PROJECT.md` |
+| note templates | `~/.openclaw/workspace-<agent>/templates/` (6 templates, refreshed on every apply) |
 | repo handoff docs | `<repo>/docs/agent/` (only files that don't exist yet) |
 
 ## 4. OpenClaw config (manual, reviewed)
 
 1. Back up first: `cp ~/.openclaw/openclaw.json ~/.openclaw/backups/openclaw.json.$(date +%Y%m%d_%H%M%S)`
 2. Merge `rendered/openclaw/agent.edge.json5` into `agents.list[]`.
-   **Heartbeat caveat:** the snippet includes a `heartbeat` block (it powers the
-   PR gate's 6h sweep). In OpenClaw, the moment ANY agent defines a `heartbeat`
-   block, agents WITHOUT one stop running heartbeats — if other agents on this
-   gateway rely on default heartbeats, give each of them an explicit
-   `heartbeat: { every: "30m" }` (that preserves the default exactly).
+   **Heartbeat caveat:** the snippet includes a `heartbeat` block. In OpenClaw,
+   the moment ANY agent defines a `heartbeat` block, agents WITHOUT one stop
+   running heartbeats — if other agents on this gateway rely on default
+   heartbeats, give each of them an explicit `heartbeat: { every: "30m" }`
+   (that preserves the default exactly). The heartbeat block itself has no
+   active tasks (the PR gate runs on-demand via `/gate sweep`).
 3. Merge `rendered/openclaw/topic.project-thread.json5` into your Telegram group's `topics` map.
 4. **Enable inline-button callbacks (required for the gate's tap-to-approve).**
    Telegram's `capabilities.inlineButtons` defaults to `allowlist`, which
@@ -129,9 +135,8 @@ bash ~/.openclaw/shared-scripts/edge-pr-gate.sh sweep --dry-run
 
 Expected: one block per configured project listing PRs/branches, the actions it
 *would* offer as buttons, and `ALL_CLEAN` at the end if the repos are trunk-only.
-The real sweep runs from the agent's heartbeat every 6h (see
-`workspace-edge/HEARTBEAT.md`); approvals are described in
-[OPERATIONS.md](OPERATIONS.md#the-pr-gate-approve-merges-from-your-phone).
+The real sweep runs on-demand via `/gate sweep` in chat; approvals are
+described in [OPERATIONS.md](OPERATIONS.md#the-pr-gate-approve-merges-from-your-phone).
 
 ## 7. Kick off the thread
 

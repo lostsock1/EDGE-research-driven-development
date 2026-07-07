@@ -96,9 +96,9 @@ bash ~/.openclaw/shared-scripts/edge-coder-run.sh --dir <other-repo-root> '<task
 
 ## The PR gate: approve merges from your phone
 
-Every 6h (task interval in `workspace-edge/HEARTBEAT.md`) the agent runs
-`edge-pr-gate.sh sweep`: every project config in `~/.config/edge-rdd/*.env` is
-checked on GitHub — open PRs + CI verdict, and every non-trunk branch. Green
+Run `/gate sweep` (or just `gate sweep` in chat) — `edge-pr-gate.sh sweep`
+checks every project config in `~/.config/edge-rdd/*.env` on
+GitHub — open PRs + CI verdict, and every non-trunk branch. Green
 PRs and stale branches become **single-use pending actions**, posted to **one
 gate thread** (`RDD_GATE_TG_*` in `~/.config/edge-rdd/gate.env` — set it to your
 EDGE coordination thread so every project's asks arrive in one place) as one
