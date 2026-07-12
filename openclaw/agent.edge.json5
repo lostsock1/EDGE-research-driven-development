@@ -17,19 +17,26 @@
 
   model: {
     primary: "{{EDGE_MODEL_PRIMARY}}",
-    // Order matters. WARNING: a user-pinned session model (/model in chat)
-    // silently disables this ENTIRE fallback chain — a 429 then surfaces as a
-    // hard error. Clear stale pins from the agent's sessions.json if a model
-    // "mysteriously" stops failing over.
-    fallbacks: [
-      "deepseek/deepseek-v4-pro",
-    ],
+    // Add "provider/model" ids in fallover order — this template ships none on
+    // purpose (pick your own). NOTE: the coder tier ladder is separate and
+    // lives in ~/.config/edge-rdd/config.env (RDD_MODELS); this block only
+    // governs the research agent itself.
+    // WARNING: a user-pinned session model (/model in chat) silently disables
+    // this ENTIRE fallback chain — a 429 then surfaces as a hard error. Clear
+    // stale pins from the agent's sessions.json if a model "mysteriously"
+    // stops failing over.
+    fallbacks: [],
   },
 
   // "gate" registers the /gate slash command (the PR-gate skill in
-  // openclaw/skills/gate/); keep it here or the agent can't invoke it, since a
-  // per-agent skills[] list is an allowlist that replaces the defaults.
-  skills: ["github", "gh-issues", "gate"],
+  // openclaw/skills/gate/) and "research" the /research command (the
+  // OpenScience dispatch skill in openclaw/skills/research/); keep them here
+  // or the agent can't invoke them, since a per-agent skills[] list is an
+  // allowlist that replaces the defaults.
+  skills: ["github", "gh-issues", "gate", "research"],
+  // Let the research agent spawn sub-agent sessions (e.g. large web-research
+  // fan-outs in a clean context).
+  subagents: { allowAgents: ["*"] },
   sandbox: { mode: "off" },
 
   // Heartbeat — kept for future use; currently has no active tasks (the PR
@@ -51,6 +58,8 @@
   tools: {
     profile: "coding",
     alsoAllow: ["message", "group:messaging"],
+    // A research agent has no business generating media; keep its surface lean.
+    deny: ["image_generate", "video_generate"],
     // Elevated exec (needed to run the dispatch wrapper) ONLY for the human
     // operator's own account — never open this to a whole group.
     elevated: {
