@@ -44,12 +44,16 @@ remove_symlink() {
 # ~/.config/edge-rdd
 remove_symlink "$HOME/.config/edge-rdd"
 
-# ~/.openclaw/skills/gate
+# ~/.openclaw/skills/{gate,research}
 remove_symlink "$HOME/.openclaw/skills/gate"
+remove_symlink "$HOME/.openclaw/skills/research"
 
-# ~/.openclaw/shared-scripts/edge-*.sh
+# ~/.openclaw/shared-scripts/*
 remove_symlink "$HOME/.openclaw/shared-scripts/edge-coder-run.sh"
 remove_symlink "$HOME/.openclaw/shared-scripts/edge-pr-gate.sh"
+remove_symlink "$HOME/.openclaw/shared-scripts/openscience-research.sh"
+remove_symlink "$HOME/.openclaw/shared-scripts/openscience-research.py"
+remove_symlink "$HOME/.openclaw/shared-scripts/openscience-smoke.sh"
 
 # ~/.config/opencode/agents/code-monkeys
 remove_symlink "$HOME/.config/opencode/agents/code-monkeys"
