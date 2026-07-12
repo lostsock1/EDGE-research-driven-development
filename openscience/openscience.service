@@ -1,0 +1,56 @@
+# openscience.service — OpenScience research workbench (research-only companion).
+#
+# Install (user unit):
+#   cp openscience/openscience.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now openscience
+#
+# The filesystem isolation below is the REAL security boundary: the workbench
+# process cannot read the gateway's credentials or other agents' state even if
+# its own app-level permissions fail. Extend InaccessiblePaths with any other
+# credential directories that exist on your machine.
+[Unit]
+Description=OpenScience research workbench (research-only, sandboxed)
+Documentation=https://www.openscience.sh/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/openscience/workspaces/edge-research
+EnvironmentFile=%h/.config/openscience/openscience.env
+Environment=HOME=%h
+Environment=LANG=C.UTF-8
+Environment=PATH=%h/.local/bin:/usr/bin:/bin
+# Headless server; binds 127.0.0.1 only (localhost).
+ExecStart=%h/.local/bin/openscience serve --port 3457
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+# ---- resource caps (shared box; do not starve the gateway) ----
+MemoryMax=3G
+CPUQuota=200%
+TasksMax=512
+Nice=10
+
+# ---- filesystem isolation (the real boundary; app permissions are "awareness only") ----
+# Whole FS read-only except these writable paths:
+ProtectSystem=strict
+ReadWritePaths=%h/openscience %h/edge-research-transfer %h/edge-research-kb %h/.config/openscience %h/.cache %h/.bun %h/.local/share/openscience %h/.local/state/openscience
+# Gateway state and credentials are unreadable at the kernel level
+# (extend this list with every credential dir on your machine):
+InaccessiblePaths=%h/.openclaw %h/.ssh %h/.config/edge-rdd %h/.bash_history -%h/.netrc -%h/.npmrc -%h/.docker -%h/.config/rclone -%h/.gnupg -%h/.aws -%h/.config/gh -%h/.config/gcloud
+
+# ---- generic hardening (no functional impact on a headless node server) ----
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://syntheticsciences.ai/config.json",
+  "model": "provider/your-research-model",
+  "small_model": "provider/your-small-model",
+  "tools": {
+    "bash": false,
+    "task": false
+  }
+}
