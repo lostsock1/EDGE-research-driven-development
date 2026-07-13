@@ -8,7 +8,9 @@ and posts a one-tap approval back to the ORIGINATING Telegram thread.
 
 Per-project: `--thread <topic>` routes the packet + buttons back to the thread the
 assignment came from (each project thread, or the home/hub thread); `--project <name>`
-tags the packet and scopes the knowledge base (`~/edge-research-kb/<project>/`).
+tags the packet and scopes the knowledge base — accepted packets land in
+`~/.openclaw/workspace-edge/projects/<project>/notes/` where the Superior
+Architecture validator can hash-bind them as evidence.
 
 OpenScience is research + knowledge-base ONLY (code execution disabled). Nothing
 here implements, branches, opens PRs, dispatches opencode, or auto-ingests into a
@@ -42,8 +44,9 @@ TG_CHAN   = os.environ.get("RDD_RESEARCH_TG_CHANNEL", "telegram")
 TG_TARGET = os.environ.get("RDD_RESEARCH_TG_TARGET", "")
 TG_THREAD = os.environ.get("RDD_RESEARCH_TG_THREAD", "")  # default/home thread
 
-XFER   = Path(os.environ.get("RDD_RESEARCH_XFER", HOME / "edge-research-transfer"))
-KB     = Path(os.environ.get("RDD_RESEARCH_KB", HOME / "edge-research-kb"))
+PROJECTS = HOME / ".openclaw/workspace-edge/projects"
+XFER   = Path(os.environ.get("RDD_RESEARCH_XFER", PROJECTS / "edge-research-transfer"))
+KB     = Path(os.environ.get("RDD_RESEARCH_KB", PROJECTS))
 ASSIGN = XFER / "assignments"
 INCOM  = XFER / "incoming"
 ARCH   = XFER / "archived"
@@ -388,6 +391,7 @@ def cmd_dispatch(args):
                              "handle": handle, "created": iso()}
         d["handles"][handle] = osr
     _with_state(add)
+    af.replace(ARCH / af.name)      # dispatched OK — clear the assignment queue
     log(f"DISPATCH {era} -> {osr} project={project or '-'} thread={rthread or 'default'} "
         f"handle={handle} profile={profile} variant={variant_label} conf={conf} act={act} {dur}s")
 
@@ -415,17 +419,34 @@ def cmd_accept(args):
     src = INCOM / f"{osr}.md"
     if not src.exists():
         print(f"packet file missing: {src}", file=sys.stderr); return 4
-    kbdir = KB / pslug(p.get("project"))
+    kbdir = KB / pslug(p.get("project")) / "notes"
     kbdir.mkdir(parents=True, exist_ok=True)
-    (kbdir / f"{osr}.md").write_text(src.read_text())        # knowledge → project KB
+    (kbdir / f"{osr}.md").write_text(src.read_text())        # knowledge → project notes/
     src.replace(ARCH / f"{osr}.md")                          # clear the mailbox
     j = INCOM / f"{osr}.json"
     if j.exists():
         j.replace(ARCH / f"{osr}.json")
     _with_state(lambda d: d["packets"][osr].update(status="accepted", accepted_at=iso()))
-    log(f"ACCEPT {osr} -> KB/{kbdir.name}")
-    print(f"accepted {osr} → research KB (edge-research-kb/{kbdir.name}/). "
+    log(f"ACCEPT {osr} -> {kbdir.relative_to(KB)}")
+    print(f"accepted {osr} → research KB ({kbdir}/). "
           f"Promote to a repo work order separately via EDGE if warranted.")
+    # Route the packet's recommendation instead of dropping it: acceptance stores
+    # knowledge, but architecture/work-order follow-through is a separate EDGE step
+    # the researcher must be reminded of (still operator-gated downstream).
+    act = p.get("recommended_action", "")
+    followups = {
+        "create-architecture-proposal":
+            f"📐 Accepted packet {osr} recommends an ARCHITECTURE update: fold its findings "
+            f"into projects/{pslug(p.get('project'))}/notes/SUPERIOR_ARCHITECTURE.md (re-bind "
+            f"source hashes; validate with validate-superior-architecture.py).",
+        "create-edge-work-order":
+            f"🔧 Accepted packet {osr} recommends an EDGE WORK ORDER: if the operator agrees, "
+            f"promote it via the project's KNOWLEDGE_STAGING → RESEARCH_TRANSFER path and "
+            f"dispatch edge-coder-run.sh.",
+    }
+    if act in followups:
+        print(f"NEXT STEP ({act}): see the reminder posted to the project thread.")
+        send_tg(followups[act], thread=p.get("thread"))
     return 0
 
 
@@ -450,7 +471,7 @@ def cmd_reject(args):
 
 def cmd_list(_):
     s = state_read()["packets"]
-    print("ASSIGNMENTS:")
+    print("ASSIGNMENTS (pending dispatch — stale entries mean a dispatch died):")
     for f in sorted(ASSIGN.glob("ERA-*.md")):
         print(f"  {f.stem}")
     print("PACKETS (incoming, awaiting approval):")

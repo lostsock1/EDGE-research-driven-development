@@ -20,7 +20,7 @@ Sub-commands:
 - `list` — assignments, produced packets, and pending approvals.
 - `status` — OpenScience health + packet counts.
 - `show <OSR-id>` — print a produced packet.
-- `accept <OSR-id|handle>` — promote a packet into the research knowledge base (`~/edge-research-kb`). Single-use. Only when the operator approves — a button tap usually arrives as `/research accept <handle>`; full `OSR-...` ids also work.
+- `accept <OSR-id|handle>` — promote a packet into the research knowledge base (`{{HOME}}/.openclaw/workspace-edge/projects/<project>/notes/`). Single-use. Only when the operator approves — a button tap usually arrives as `/research accept <handle>`; full `OSR-...` ids also work.
 - `reject <OSR-id|handle>` — archive a packet without adding it to the KB. Single-use. A button tap usually arrives as `/research reject <handle>`; full `OSR-...` ids also work.
 - `followup <OSR-id|handle> "<question>" [--profile software]` — dispatch a follow-up question referencing a prior packet.
 

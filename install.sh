@@ -240,7 +240,7 @@ if [ -d "rendered/workspace-edge/templates" ]; then
 fi
 
 # 5. Scripts (workspace-edge/scripts/)
-for f in edge-coder-run.sh edge-pr-gate.sh validate-superior-architecture.py openscience-research.sh openscience-research.py openscience-smoke.sh; do
+for f in edge-coder-run.sh edge-pr-gate.sh validate-superior-architecture.py rdd-heartbeat-sweep.sh openscience-research.sh openscience-research.py openscience-smoke.sh; do
   if [ -f "scripts/$f" ]; then
     install -m 0755 "scripts/$f" "$WORKSPACE/scripts/$f"
     echo "  installed: scripts/$f"
@@ -364,6 +364,11 @@ RDD_RESEARCH_TG_CHANNEL=$(printf '%q' "${RDD_GATE_TG_CHANNEL:-${RDD_TG_CHANNEL:-
 RDD_RESEARCH_TG_TARGET=$(printf '%q' "${RDD_GATE_TG_TARGET:-${RDD_TG_TARGET:-}}")
 RDD_RESEARCH_TG_THREAD=$(printf '%q' "${RDD_GATE_TG_THREAD:-${RDD_TG_THREAD:-}}")
 RDD_OPENCLAW=$(printf '%q' "$HOME/.local/bin/openclaw")
+# Research folders live inside the workspace projects tree: KB root = projects dir
+# (accepted packets land in <project>/notes/, hash-bindable by the architecture
+# validator); the transfer mailbox sits alongside the projects.
+RDD_RESEARCH_KB=$(printf '%q' "$WORKSPACE/projects")
+RDD_RESEARCH_XFER=$(printf '%q' "$WORKSPACE/projects/edge-research-transfer")
 RESEOF
 echo "  installed: config/edge-rdd/research.env"
 
@@ -405,7 +410,7 @@ for sk in gate research; do
 done
 
 # ~/.openclaw/shared-scripts/* -> workspace/scripts/*
-for f in edge-coder-run.sh edge-pr-gate.sh validate-superior-architecture.py openscience-research.sh openscience-research.py openscience-smoke.sh; do
+for f in edge-coder-run.sh edge-pr-gate.sh validate-superior-architecture.py rdd-heartbeat-sweep.sh openscience-research.sh openscience-research.py openscience-smoke.sh; do
   symlink "$WORKSPACE/scripts/$f" "$HOME/.openclaw/shared-scripts/$f"
   echo "  symlink: ~/.openclaw/shared-scripts/$f -> workspace/scripts/$f"
 done
