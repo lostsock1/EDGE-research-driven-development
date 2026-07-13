@@ -9,9 +9,10 @@ python3 scripts/validate-superior-architecture.py \
   --workspace . --project <slug> --heartbeat
 ```
 
-- `PASS` means the artifact is substantive, source-indexed, versioned, within
-  the age limit, SHA-256-bound to the exact north-star spec bytes, and bound
-  to every declared local Markdown evidence file.
+- `PASS` means the operator-attested product authority exists and the artifact
+  is substantive, source-indexed, versioned, within the age limit, SHA-256-bound
+  to the exact north-star spec bytes, and bound to every declared local Markdown
+  evidence file.
 - `BLOCKED` is an operator-visible blocker, not permission to invent a product
   definition, sources, or architecture.
 - `MODEL_ACTION` appears only when the canonical spec is structurally eligible

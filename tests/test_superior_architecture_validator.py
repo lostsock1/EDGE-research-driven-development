@@ -94,6 +94,13 @@ class SuperiorArchitectureValidatorTests(unittest.TestCase):
         self.assertIn("AUTHORITY_REQUIRED", result.stdout)
         self.assertNotIn("MODEL_ACTION", result.stdout)
 
+    def test_complete_architecture_cannot_pass_without_operator_attestation(self):
+        spec = valid_spec(authority=False)
+        result = self.run_validator(spec=spec, architecture=architecture_for(spec))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("lacks operator authority attestation", result.stdout)
+        self.assertNotIn("PASS:", result.stdout)
+
     def test_invalid_spec_never_authorizes_model_synthesis(self):
         result = self.run_validator(spec="{{PROJECT_NAME}}", architecture="# architecture\n", heartbeat=True)
         self.assertNotEqual(result.returncode, 0)

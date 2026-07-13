@@ -92,6 +92,11 @@ def validate(
         spec_valid, spec_authorized, reason = spec_status(spec_text)
         if not spec_valid:
             blockers.append(f"north-star spec is not structurally eligible: {reason}")
+        elif not spec_authorized:
+            blockers.append(
+                "north-star spec lacks operator authority attestation; only the operator may add "
+                "frontmatter authority: operator-supplied"
+            )
 
     if not arch.is_file():
         blockers.append(f"missing Superior Architecture: {arch}")
