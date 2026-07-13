@@ -2,8 +2,9 @@
 # uninstall.sh — remove EDGE workspace-first scaffolding.
 #
 #   ./uninstall.sh              remove symlinks only (safe, reversible)
-#   ./uninstall.sh --purge      remove workspace-edge too (keeps project repos)
-#   ./uninstall.sh --purge-all  remove everything including project repos
+#   ./uninstall.sh --purge      remove runtime workspace, keep EDGE project notes
+#   ./uninstall.sh --purge-all  remove the entire EDGE workspace including notes
+# External project repos configured by RDD_REPO_DIR are always untouched.
 #
 # The template repo (this directory) is never removed by this script.
 
@@ -51,6 +52,7 @@ remove_symlink "$HOME/.openclaw/skills/research"
 # ~/.openclaw/shared-scripts/*
 remove_symlink "$HOME/.openclaw/shared-scripts/edge-coder-run.sh"
 remove_symlink "$HOME/.openclaw/shared-scripts/edge-pr-gate.sh"
+remove_symlink "$HOME/.openclaw/shared-scripts/validate-superior-architecture.py"
 remove_symlink "$HOME/.openclaw/shared-scripts/openscience-research.sh"
 remove_symlink "$HOME/.openclaw/shared-scripts/openscience-research.py"
 remove_symlink "$HOME/.openclaw/shared-scripts/openscience-smoke.sh"
@@ -65,17 +67,17 @@ if [ "$MODE" = "--purge" ] || [ "$MODE" = "--purge-all" ]; then
   if [ -d "$WORKSPACE" ]; then
     if [ "$MODE" = "--purge-all" ]; then
       rm -rf "$WORKSPACE"
-      echo "  removed: $WORKSPACE (including project repos)"
+      echo "  removed: $WORKSPACE (including EDGE project notes; external repos untouched)"
     else
-      # Keep project repos, remove everything else
+      # Keep EDGE-owned project notes, remove everything else
       if [ -d "$WORKSPACE/projects" ]; then
-        # Move projects to temp, nuke workspace, move projects back
+        # Move project notes to temp, nuke workspace, move notes back
         tmp=$(mktemp -d)
         mv "$WORKSPACE/projects" "$tmp/projects"
         rm -rf "$WORKSPACE"
         mkdir -p "$HOME/.openclaw"
         mv "$tmp/projects" "$WORKSPACE/projects" 2>/dev/null || true
-        echo "  removed: $WORKSPACE (kept project repos in $WORKSPACE/projects/)"
+        echo "  removed: $WORKSPACE (kept EDGE project notes in $WORKSPACE/projects/)"
       else
         rm -rf "$WORKSPACE"
         echo "  removed: $WORKSPACE"
@@ -100,8 +102,8 @@ if [ "$MODE" = "symlinks" ]; then
   echo "To remove workspace too: ./uninstall.sh --purge"
   echo "To remove everything:    ./uninstall.sh --purge-all"
 elif [ "$MODE" = "--purge" ]; then
-  echo "Workspace removed. Project repos preserved at: $WORKSPACE/projects/"
-  echo "To remove project repos too: ./uninstall.sh --purge-all"
+  echo "Workspace removed. EDGE project notes preserved at: $WORKSPACE/projects/"
+  echo "External project repos were not touched. To remove EDGE notes too: ./uninstall.sh --purge-all"
 else
   echo "Everything removed. The template repo (this directory) is untouched."
 fi

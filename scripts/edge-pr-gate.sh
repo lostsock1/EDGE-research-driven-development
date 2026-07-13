@@ -5,8 +5,8 @@
 # Part of the "EDGE — Evidence-Driven Git Engineering" template.
 #
 # WHAT IT DOES
-#   Every heartbeat tick (default: a 6h task in the research agent's
-#   HEARTBEAT.md) the agent runs `sweep`. For every configured project this:
+#   On `/gate sweep` (and after a dispatch reaches a green CI verdict), the
+#   agent scans every configured project. For each project this:
 #     - lists open PRs and their CI verdict (green / red / pending)
 #     - lists every non-trunk branch and classifies it (active PR head,
 #       merged/closed-PR leftover, orphan with/without unique commits)
@@ -42,7 +42,8 @@
 #   ~/.config/edge-rdd) that defines RDD_REPO_DIR. The same files the dispatch
 #   wrapper (edge-coder-run.sh) uses — no second registry to drift.
 #   Per-file keys used here: RDD_REPO_DIR, RDD_MAIN_BRANCH, RDD_TG_CHANNEL,
-#   RDD_TG_TARGET, RDD_TG_THREAD, RDD_OPENCLAW.
+#   RDD_TG_TARGET, RDD_TG_THREAD, RDD_OPENCLAW, RDD_REQUIRED_CHECKS. Shared
+#   runtime policy is inherited from config.env; project identity is not.
 #   Gate knobs (environment, with defaults):
 #     RDD_GATE_CONFIG_DIR    ~/.config/edge-rdd
 #     RDD_GATE_STATE_DIR     ~/.local/state/edge-rdd/pr-gate
@@ -54,7 +55,9 @@
 #
 # SAFETY RAILS
 #   - trunk (RDD_MAIN_BRANCH) is never merged from, deleted, or pruned
-#   - merge requires: PR open, not draft, zero failing AND zero pending checks
+#   - merge requires: PR open, not draft, every check green, every configured
+#     required context present/pass, and an eligible current-head reviewer marker
+#   - a PR with no CI is never chat-merge actionable
 #   - prune requires: branch is not trunk and not the head of any open PR
 #   - action ids are single-use; unknown/consumed ids are refused with the
 #     current pending list
@@ -135,9 +138,13 @@ def parse_env_file(path):
 
 def projects():
     out = []
+    shared = parse_env_file(CFG_DIR / "config.env") if (CFG_DIR / "config.env").exists() else {}
+    shared_keys = {k: v for k, v in shared.items() if k in {
+        "RDD_OPENCLAW", "RDD_REQUIRED_CHECKS", "RDD_PATH_PREPEND"}}
     for f in sorted(CFG_DIR.glob("*.env")):
-        env = parse_env_file(f)
-        repo_dir = env.get("RDD_REPO_DIR")
+        project_env = parse_env_file(f)
+        env = {**shared_keys, **project_env}
+        repo_dir = project_env.get("RDD_REPO_DIR")
         if not repo_dir:
             continue
         out.append({
@@ -149,6 +156,7 @@ def projects():
             "target": env.get("RDD_TG_TARGET", ""),
             "thread": env.get("RDD_TG_THREAD", ""),
             "openclaw": env.get("RDD_OPENCLAW", str(HOME / ".local/bin/openclaw")),
+            "required_checks": [c.strip() for c in env.get("RDD_REQUIRED_CHECKS", "").split(",") if c.strip()],
         })
     return out
 
@@ -268,23 +276,41 @@ def repo_slug(proj):
     return (out, None) if rc == 0 and out else (None, err or "no slug")
 
 
-def pr_checks_verdict(slug, number):
-    """green | red | pending | no-ci"""
+def pr_checks_verdict(slug, number, required):
+    """Return a strict CI verdict and explanation."""
     rc, out, err = run(["gh", "pr", "checks", str(number), "-R", slug,
-                        "--json", "bucket"], timeout=30)
+                        "--json", "name,bucket"], timeout=30)
     if not out:
-        return "no-ci"
+        return "no-ci", "no checks reported"
     try:
-        buckets = [c.get("bucket") for c in json.loads(out)]
+        checks = json.loads(out)
     except json.JSONDecodeError:
-        return "no-ci"
-    if not buckets:
-        return "no-ci"
-    if any(b == "fail" for b in buckets):
-        return "red"
-    if any(b == "pending" for b in buckets):
-        return "pending"
-    return "green"
+        return "no-ci", "checks response was not JSON"
+    if not checks:
+        return "no-ci", "no checks reported"
+    by_name = {c.get("name"): c.get("bucket") for c in checks}
+    missing = [name for name in required if name not in by_name]
+    if missing:
+        return "missing-required", "missing required: " + ", ".join(missing)
+    if any(c.get("bucket") == "fail" for c in checks):
+        return "red", "failing checks present"
+    if any(c.get("bucket") != "pass" for c in checks):
+        return "pending", "checks not all passed"
+    return "green", "all checks passed; required contexts present"
+
+
+def reviewer_gate(slug, number, head_sha):
+    comments, err = gh_json(["api", f"repos/{slug}/issues/{number}/comments?per_page=100"], timeout=30)
+    if comments is None:
+        return False, f"review marker unavailable ({err})"
+    pattern = re.compile(r"<!-- edge-review-gate sha=([0-9a-f]+) class=(trivial|nontrivial) verdict=([a-z-]+) ready=(yes|no) trust=model-reported -->")
+    for comment in reversed(comments):
+        match = pattern.search(comment.get("body", ""))
+        if match and match.group(1) == head_sha:
+            if match.group(4) == "yes":
+                return True, f"review={match.group(3)} ({match.group(2)}; model-reported)"
+            return False, f"review={match.group(3)} ({match.group(2)}; not ready)"
+    return False, "missing reviewer marker for current head"
 
 
 def gather(proj):
@@ -296,11 +322,14 @@ def gather(proj):
         return None, f"cannot resolve GitHub repo ({err}) — skipped"
 
     prs, err = gh_json(["pr", "list", "-R", slug, "--state", "open", "--json",
-                        "number,title,headRefName,isDraft,url"], timeout=30)
+                        "number,title,headRefName,headRefOid,isDraft,url"], timeout=30)
     if prs is None:
         return None, f"gh pr list failed ({err}) — skipped"
     for pr in prs:
-        pr["verdict"] = pr_checks_verdict(slug, pr["number"])
+        pr["verdict"], pr["verdict_detail"] = pr_checks_verdict(
+            slug, pr["number"], proj["required_checks"])
+        pr["review_ready"], pr["review_detail"] = reviewer_gate(
+            slug, pr["number"], pr["headRefOid"])
 
     rc, out, err = run(["gh", "api", f"repos/{slug}/branches?per_page=100",
                         "--paginate", "--jq", ".[].name"], timeout=40)
@@ -363,13 +392,16 @@ def action_explainer(a):
             f"   Consequence: those changes become part of {trunk}, your "
             f"shippable line — and if you deploy from {trunk} this is what "
             f"reaches production. The PR closes and the branch is gone. "
-            f"Required CI checks are green right now, so nothing failing goes "
-            f"in; but CI only proves what it tests — a green check is not a "
+            f"Every reported CI check is green, every named required context is present, "
+            f"and the current-head reviewer marker is eligible right now, so nothing "
+            f"known-failing goes in. Reviewer evidence is model-reported and the wrapper "
+            f"cannot prove the reviewer actually ran; CI only proves what it tests — green is not a "
             f"substitute for you being happy with the change.\n"
             f"   Why it's offered: the coder finished this work, opened the PR, "
-            f"and CI passed — it's sitting ready with nothing blocking it. When "
-            f"you approve I re-check, at that moment, that it is still open and "
-            f"still green; if CI has gone red since, I refuse rather than merge "
+            f"and the configured gates passed — it's sitting ready with nothing blocking it. When "
+            f"you approve I re-check, at that moment, that it is still open, all checks "
+            f"and named contexts still pass, and reviewer evidence still matches the head; "
+            f"if any gate changed, I refuse rather than merge "
             f"a stale approval.\n"
             f"   Link: {a['url']}"
         )
@@ -404,10 +436,10 @@ def desired_actions(proj, facts):
     """key -> action template. Only things an operator can approve."""
     out = {}
     for pr in facts["prs"]:
-        if pr["isDraft"] or pr["verdict"] not in ("green", "no-ci"):
+        if pr["isDraft"] or pr["verdict"] != "green" or not pr["review_ready"]:
             continue
         key = f"merge:{pr['number']}"
-        note = "" if pr["verdict"] == "green" else " (repo has no CI checks)"
+        note = f" ({pr['review_detail']})"
         out[key] = {
             "kind": "merge", "pr": pr["number"], "branch": pr["headRefName"],
             "title": pr["title"][:60], "url": pr["url"],
@@ -443,14 +475,17 @@ def sweep(dry=False):
 
             # info lines
             red = [p for p in facts["prs"] if p["verdict"] == "red"]
-            pend = [p for p in facts["prs"] if p["verdict"] == "pending"]
+            pend = [p for p in facts["prs"] if p["verdict"] in ("pending", "missing-required", "no-ci")]
+            review_blocked = [p for p in facts["prs"] if p["verdict"] == "green" and not p["review_ready"]]
             drafts = [p for p in facts["prs"] if p["isDraft"]]
             print(f"  repo {facts['slug']}: {len(facts['branches'])} branch(es), "
                   f"{len(facts['prs'])} open PR(s)")
             for p in red:
                 print(f"  ❌ PR #{p['number']} CI RED — {p['title'][:60]} {p['url']}")
             for p in pend:
-                print(f"  ⏳ PR #{p['number']} CI pending — {p['title'][:60]}")
+                print(f"  ⏳ PR #{p['number']} CI {p['verdict']} ({p['verdict_detail']}) — {p['title'][:60]}")
+            for p in review_blocked:
+                print(f"  ⛔ PR #{p['number']} reviewer gate blocked ({p['review_detail']}) — {p['title'][:60]}")
             for p in drafts:
                 print(f"  \U0001f4dd PR #{p['number']} draft — {p['title'][:60]}")
 
@@ -476,9 +511,9 @@ def sweep(dry=False):
                 actions.append((aid, a))
 
             if not actions:
-                if red or pend:
+                if red or pend or review_blocked:
                     all_clean = False
-                    print("  no approvals needed (red/pending PRs ride the coder loop)")
+                    print("  no approvals needed (CI/reviewer-blocked PRs ride the coder loop)")
                 else:
                     print("  clean ✓ (trunk-only or only active PR work)")
                 state["posts"].setdefault(label, {})["fingerprint"] = ""
@@ -513,14 +548,17 @@ def sweep(dry=False):
             for aid, a in shown:
                 lines.append(action_explainer(a))
                 lines.append("")
-            if red or pend:
+            if red or pend or review_blocked:
                 aware = []
                 for p in red:
                     aware.append(f"   • PR #{p['number']} CI is RED — {p['title'][:50]} "
                                  f"(I won't offer a red PR; it goes back through the coder loop)")
                 for p in pend:
-                    aware.append(f"   • PR #{p['number']} CI still running — {p['title'][:50]} "
-                                 f"(I'll offer it once it's green)")
+                    aware.append(f"   • PR #{p['number']} CI is {p['verdict']} — {p['verdict_detail']} "
+                                 f"(not merge-actionable)")
+                for p in review_blocked:
+                    aware.append(f"   • PR #{p['number']} reviewer gate blocked — {p['review_detail']} "
+                                 f"(model-reported evidence is a trust limit, not proof)")
                 lines.append("For your awareness (not actionable here):")
                 lines.extend(aware)
                 lines.append("")
@@ -673,9 +711,14 @@ def execute(a, proj):
             return f"could not re-verify PR #{a['pr']} ({err})", False
         if pr["state"] != "OPEN" or pr["isDraft"]:
             return f"PR #{a['pr']} is {pr['state']}{' (draft)' if pr['isDraft'] else ''} — not merging", False
-        verdict = pr_checks_verdict(slug, a["pr"])
-        if verdict not in ("green", "no-ci"):
-            return f"PR #{a['pr']} checks are {verdict} now (were green at ask time) — not merging", False
+        verdict, detail = pr_checks_verdict(slug, a["pr"], proj["required_checks"])
+        rc, head_sha, _ = run(["gh", "pr", "view", str(a["pr"]), "-R", slug,
+                               "--json", "headRefOid", "--jq", ".headRefOid"], timeout=25)
+        review_ready, review_detail = reviewer_gate(slug, a["pr"], head_sha if rc == 0 else "")
+        if verdict != "green":
+            return f"PR #{a['pr']} checks are {verdict} ({detail}) now — not merging", False
+        if not review_ready:
+            return f"PR #{a['pr']} reviewer gate is blocked ({review_detail}) — not merging", False
         rc, out, err = run(["gh", "pr", "merge", str(a["pr"]), "-R", slug,
                             f"--{MERGE_METHOD}", "--delete-branch"],
                            cwd=proj["repo_dir"], timeout=60)

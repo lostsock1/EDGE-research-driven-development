@@ -49,7 +49,7 @@ The track starts with the **operator north-star spec** — `projects/{{PROJECT_S
 - When coding is needed, first promote the task into `RESEARCH_TRANSFER.md`, `TASKS.md`, an ADR, or another active execution doc. Then dispatch code-monkeys ONLY via the wrapper (never raw `opencode run` — the wrapper owns model fallback, timeouts, the concurrency lock, and the feedback loop):
 
 ```bash
-bash {{HOME}}/.openclaw/shared-scripts/edge-coder-run.sh '<promoted implementation task>'
+EDGE_RDD_CONFIG={{HOME}}/.config/edge-rdd/{{PROJECT_SLUG}}.env bash {{HOME}}/.openclaw/shared-scripts/edge-coder-run.sh '<promoted implementation task>'
 ```
 
 - The wrapper is **async**: it returns `DISPATCHED <run-id>` within seconds — relay that and end the turn; never wait, poll, or re-dispatch. The completion summary (model, branch, commits, PR link) and the CI verdict arrive automatically as messages in this thread. `status` subcommand inspects a running dispatch; `--fg` only when the operator explicitly asks.

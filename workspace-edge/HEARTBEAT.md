@@ -1,11 +1,20 @@
 # Heartbeat — {{AGENT_NAME}}
 
-_No active heartbeat tasks._
+## Superior Architecture integrity check
 
-<!--
-  This file is a status/notes file only.
-  PR gate sweeps run on-demand via `/gate sweep` (the gate skill executes
-  shared-scripts/edge-pr-gate.sh) and automatically when a dispatch's PR
-  goes CI-green (the dispatch wrapper triggers a sweep so the merge button
-  appears without waiting). See docs/OPERATIONS.md §The PR gate.
--->
+On a scheduled heartbeat/cron pass, run this for each directory under `projects/`:
+
+```bash
+python3 scripts/validate-superior-architecture.py \
+  --workspace . --project <slug> --heartbeat
+```
+
+- `PASS` means the artifact is substantive, sourced, versioned, and fresh.
+- `BLOCKED` is an operator-visible blocker, not permission to invent a product
+  definition, sources, or architecture.
+- `MODEL_ACTION` appears only when the authoritative `<slug>-north-star.md`
+  exists and is substantive. A model must read that spec and the cited project
+  evidence and author the synthesis; the validator never generates prose.
+
+PR gate sweeps remain on-demand via `/gate sweep` and automatically follow a
+CI-green dispatch. See `docs/OPERATIONS.md` §The PR gate.

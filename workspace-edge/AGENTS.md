@@ -19,7 +19,7 @@
 - `projects/{{PROJECT_SLUG}}/` — ...
 
 ## Project kickoff: north-star track
-- New projects start with an operator **north-star specification**, generated via `templates/North Star Spec.md` (full prompt, short variant, and technical/product/adversarial add-ons — usage header in the template).
+- New projects start with an operator **north-star specification**, generated via `templates/north-star-spec.md` (full prompt, short variant, and technical/product/adversarial add-ons — usage header in the template).
 - The spec lands verbatim at `projects/<project>/notes/<project>-north-star.md` (`status: unprocessed`); {{AGENT_NAME}} distills it into the charter Mission, then synthesizes `notes/SUPERIOR_ARCHITECTURE.md` from it.
 - Raw spec sections are never work orders. Promotion into a repo is gated through `KNOWLEDGE_STAGING.md` → `RESEARCH_TRANSFER.md` → `TASKS.md`; the spec and the north-star doc themselves never enter the repo.
 
@@ -30,8 +30,8 @@
 
 ## Install & portability
 - This workspace is a **rendered {{AGENT_NAME}} install** plus a local Obsidian layer. `install.sh` (from `lostsock1/EDGE-evidence-driven-git-engineering`) renders the `template.env` values into the double-brace tokens and applies; it is fully portable (no hardcoded paths in the templates).
-- **install.sh owns** (re-render/re-apply on a new system): `~/.config/edge-rdd/{config,gate,research}.env`, `shared-scripts/edge-coder-run.sh` + `edge-pr-gate.sh` + `openscience-research.{sh,py}` + `openscience-smoke.sh`, the `gate`/`research` skills, opencode `code-monkeys/` agents, `USER.md`, `personas/`, `projects/<slug>/{PROJECT,RESUME}.md` + seeded `notes/`, and each repo's `docs/agent/`.
-- **Local layer (NOT from install.sh — version-control separately)**: the numbered Obsidian vault (`00_INBOX`–`99_ARCHIVE`), `.obsidian/`, this `AGENTS.md`, `EDGE Vault.md`, `SKILL-REGISTRY.md`, other root docs, multi-project configs, and per-project `notes/` beyond the seeded files.
+- **install.sh owns** (re-render/re-apply on a new system): shared `~/.config/edge-rdd/config.env`, per-project `~/.config/edge-rdd/<slug>.env`, and `{gate,research}.env`, `shared-scripts/edge-coder-run.sh` + `edge-pr-gate.sh` + `openscience-research.{sh,py}` + `openscience-smoke.sh`, the `gate`/`research` skills, opencode `code-monkeys/` agents, `USER.md`, `personas/`, `projects/<slug>/{PROJECT,RESUME}.md` + seeded `notes/`, and each repo's `docs/agent/`.
+- **Local layer (NOT from install.sh — version-control separately)**: the numbered Obsidian vault (`00_INBOX`–`99_ARCHIVE`), `.obsidian/`, `EDGE Vault.md`, `SKILL-REGISTRY.md`, other root docs, multi-project configs, and per-project `notes/` beyond the seeded files.
 - **Runtime state (never port)**: `.openclaw/`, `storage/`, `snapshots/`, logs, `.qdrant-initialized`.
 - **Rebuild on a new system:** clone {{AGENT_NAME}} → `cp template.env.example template.env` → fill in → `./install.sh` (review `rendered/`) → `./install.sh --apply` → merge `rendered/openclaw/*.json5` into `openclaw.json` → `scripts/kickoff.sh`. Re-render `config.env`; do not copy it.
 

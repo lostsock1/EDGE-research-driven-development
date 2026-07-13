@@ -77,6 +77,8 @@ fallback path: model-a: rate-limited → model-b      <- only when tiers failed
 branch: cm/qdq-retrieval-parity
 PR: https://github.com/you/repo/pull/12
 trailer: yes
+reviewer: pass (model-reported; wrapper cannot prove reviewer execution)
+gate readiness: eligible-for-CI-gate
 commits:
 a1b2c3d Add retrieval parity eval script
 full output: ~/.local/state/edge-rdd/runs/run-...log
@@ -85,10 +87,10 @@ full output: ~/.local/state/edge-rdd/runs/run-...log
 - **effort/variant lines** — which effort profile the dispatch ran at and which opencode variant tier 1 used; the exact model id is in the run log's `=== LOOP CLOSER ===` block.
 - **fallback path** — present only when tiers failed over; a fallback is never silent.
 - **PR: none + no commits** — the run was likely beheaded (see troubleshooting) or the coder stopped at a research boundary; check the run log and `EDGE_COLLABORATION.md`.
-- **trailer: MISSING** — the model skipped the mandatory status trailer; the wrapper's own git/PR facts above are still reliable, but treat the model's prose claims with suspicion.
+- **trailer/reviewer/gate readiness** — non-trivial work needs a parsed Pass/Pass-with-risks verdict. The verdict is model-reported: the wrapper verifies syntax and head SHA, not that an independent reviewer truly ran.
 - **⚠️ OPEN EDGE request(s)** — the coder handed research back; that's the loop working, not a failure. EDGE answers, promotes, re-dispatches.
 
-Then, minutes later: `✅ PR #12 CI: all checks green — ready for human merge.` — that's your cue. Merging is always yours.
+Then, minutes later, the wrapper reports CI plus reviewer eligibility. The gate independently requires every reported check green, every project-named required context present/pass, and a current-head eligible reviewer marker. No-CI PRs are never chat-mergeable. Merging is always yours.
 
 ## Failure classifications (ledger + failure messages)
 
@@ -132,20 +134,11 @@ Then, minutes later: `✅ PR #12 CI: all checks green — ready for human merge.
 
 ## Multiple projects on one server
 
-The wrapper's default config file (`~/.config/edge-rdd/config.env`) describes the **primary** project and the shared model tier ladder. A second project reuses the same wrapper and coder agents with per-dispatch overrides — no second install needed:
-
-```bash
-EDGE_CODER_THREAD=<other-topic-id> \
-bash ~/.openclaw/shared-scripts/edge-coder-run.sh --dir <other-repo-root> '<task>'
-```
-
-(`EDGE_CODER_TARGET` too if the thread lives in a different group.) Bake exactly this command into the second project's charter so its research agent never dispatches with the defaults. Each project gets its own charter + RESUME.md (`workspace-edge/` templates rendered with that project's values), its own topic binding, and its own `docs/agent/` seed in its repo. Note: the per-repo lock is already per-`--dir`, so two projects can dispatch concurrently; the completion messages route to each project's own thread via the env override.
-
-Caveat: plain `RDD_*` environment variables do **not** override the config — sourcing the config file clobbers them. If the second project needs different values for anything beyond target/thread (`RDD_MAIN_BRANCH`, `RDD_DOCS_DIR`, models…), give it its own config file and point the dispatch at it:
+`~/.config/edge-rdd/config.env` contains shared model, timeout, and variant policy only. Every project has a `<slug>.env` containing repo/chat/branch/check identity. Select it explicitly (the installer also records one default project):
 
 ```bash
 EDGE_RDD_CONFIG=~/.config/edge-rdd/<project>.env \
-bash ~/.openclaw/shared-scripts/edge-coder-run.sh --dir <other-repo-root> '<task>'
+bash ~/.openclaw/shared-scripts/edge-coder-run.sh '<task>'
 ```
 
 ## Effort profiles (how hard the coder thinks)
@@ -157,10 +150,10 @@ doc fixes → `fast`, everything else → `standard`) and applies your
 `RDD_VARIANTS_<PROFILE>` per-tier variant map. Override per dispatch with a
 task prefix — `[effort=deep] fix the flaky retry test` — or the
 `EDGE_CODER_EFFORT` env var. The chosen profile is recorded in the ledger, the
-lock holder, the loop closer, and the completion message. Variant maps are
-**yours to define** (they must match variants in your opencode config); with
-none defined, `auto` still classifies and records the profile but tiers run
-with the baseline `RDD_VARIANTS` (or none).
+lock holder, the loop closer, and the completion message. Variant maps are **yours to define** and must match variants in your opencode
+config. Empty fast/standard/deep maps may keep the baseline. `max` requires an
+explicit, index-aligned `RDD_VARIANTS_MAX`; the wrapper refuses to run baseline
+variants while labelling the dispatch max.
 
 ## Research dispatch (/research — the OpenScience companion)
 

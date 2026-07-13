@@ -20,7 +20,7 @@ cp template.env.example template.env
 $EDITOR template.env        # fill in EVERY value — see comments in the file
 ```
 
-The important ones: `RDD_HOME`, `RDD_REPO_SLUG`/`RDD_REPO_DIR`, `RDD_MAIN_BRANCH`, `RDD_TG_TARGET`/`RDD_TG_THREAD`, `RDD_OPERATOR_TG_USER_ID`, and the model knobs (`RDD_MODELS`, `RDD_CODER_MODEL`, `RDD_EDGE_MODEL_PRIMARY`) — the template ships **no** model choices; every `provider/model` placeholder must become one of yours.
+The important ones: `RDD_REPO_SLUG`/`RDD_REPO_DIR`, `RDD_MAIN_BRANCH`, `RDD_TG_TARGET`/`RDD_TG_THREAD`, `RDD_OPERATOR_TG_USER_ID`, and the model knobs (`RDD_MODELS`, `RDD_CODER_MODEL`, `RDD_EDGE_MODEL_PRIMARY`) — the template ships **no** model choices; every `provider/model` placeholder must become one of yours.
 
 ## 2. Render and inspect
 
@@ -40,7 +40,8 @@ This installs (with timestamped backups under `~/.config/edge-rdd/backups/`):
 
 | What | Where |
 |---|---|
-| runtime config (primary project + model ladder) | `~/.config/edge-rdd/config.env` |
+| shared model/timeout/variant policy | `~/.config/edge-rdd/config.env` |
+| project identity (repo/chat/branch/checks) | `~/.config/edge-rdd/<slug>.env` |
 | PR-gate hub + research dispatch configs | `~/.config/edge-rdd/gate.env`, `~/.config/edge-rdd/research.env` |
 | dispatch wrapper + PR gate + research scripts | `~/.openclaw/shared-scripts/` (symlinks into the workspace) |
 | `/gate` + `/research` skills | `~/.openclaw/skills/{gate,research}` (symlinks) |
@@ -63,8 +64,8 @@ This installs (with timestamped backups under `~/.config/edge-rdd/backups/`):
    the moment ANY agent defines a `heartbeat` block, agents WITHOUT one stop
    running heartbeats — if other agents on this gateway rely on default
    heartbeats, give each of them an explicit `heartbeat: { every: "30m" }`
-   (that preserves the default exactly). The heartbeat block itself has no
-   active tasks (the PR gate runs on-demand via `/gate sweep`).
+   (that preserves the default exactly). The heartbeat runs only the portable Superior Architecture integrity check;
+   the PR gate remains on-demand via `/gate sweep`.
 3. Merge `rendered/openclaw/topic.project-thread.json5` into your Telegram group's `topics` map, and `rendered/openclaw/topic.hub-thread.json5` for the coordination/gate-hub thread.
 4. **Enable inline-button callbacks (required for the gate's tap-to-approve).**
    Telegram's `capabilities.inlineButtons` defaults to `allowlist`, which
@@ -105,7 +106,7 @@ openclaw channels status     # wait for Telegram to reconnect (~15-40s)
 3. Apply protection:
 
 ```bash
-bash github/protect-branch.sh
+EDGE_RDD_CONFIG=~/.config/edge-rdd/<slug>.env bash github/protect-branch.sh
 ```
 
 4. Verify the gate actually bites:
@@ -135,7 +136,9 @@ PR gate dry run (no messages sent, nothing executed):
 bash ~/.openclaw/shared-scripts/edge-pr-gate.sh sweep --dry-run
 ```
 
-Expected: one block per configured project listing PRs/branches, the actions it
+Expected: one block per configured project listing PRs/branches and only actions
+whose checks are all green, whose named required contexts are present/pass, and
+whose current-head reviewer marker is eligible. A no-CI PR is never offered. The actions it
 *would* offer as buttons, and `ALL_CLEAN` at the end if the repos are trunk-only.
 The real sweep runs on-demand via `/gate sweep` in chat; approvals are
 described in [OPERATIONS.md](OPERATIONS.md#the-pr-gate-approve-merges-from-your-phone).

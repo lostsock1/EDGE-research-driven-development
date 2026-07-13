@@ -8,8 +8,8 @@ EDGE is the research agent that drives the entire development loop: research →
 - **This repo**: The canonical EDGE template and scaffolding tool
 
 ## Projects Managed
-- **RAG**: API-first, ACL-aware RAG platform (lostsock1/RAG)
-- **NAIRRATOR**: Audio-AR / spatial-intelligence companion (lostsock1/Nairrator)
+- **RAGSTER**: API-first, ACL-aware RAG platform (deployment-specific repo configured via its own `<slug>.env`)
+- **NAIRRATOR**: Audio-AR / spatial-intelligence companion. The public template provides only generic behavior; its repo path, topic, checks, models, and ids must be supplied in a per-project config and are never baked into this repository.
 
 ## Architecture
 See docs/ARCHITECTURE.md and docs/SETUP.md in this repo.

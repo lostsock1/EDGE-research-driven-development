@@ -21,7 +21,13 @@ CONFIG="${EDGE_RDD_CONFIG:-$HOME/.config/edge-rdd/config.env}"
 OWNER="${OWNER:-${RDD_REPO_SLUG%%/*}}"
 REPO="${REPO:-${RDD_REPO_SLUG##*/}}"
 BRANCH="${BRANCH:-${RDD_MAIN_BRANCH:-main}}"
-CHECKS="${CHECKS:-${RDD_REQUIRED_CHECKS:-tests,lint}}"
+if [[ -v CHECKS ]]; then
+  CHECKS_VALUE="$CHECKS"
+elif [[ -v RDD_REQUIRED_CHECKS ]]; then
+  CHECKS_VALUE="$RDD_REQUIRED_CHECKS"
+else
+  CHECKS_VALUE="tests,lint"
+fi
 
 if [ -z "$OWNER" ] || [ -z "$REPO" ]; then
   echo "protect-branch: set OWNER/REPO (or RDD_REPO_SLUG in config.env)" >&2
@@ -29,7 +35,7 @@ if [ -z "$OWNER" ] || [ -z "$REPO" ]; then
 fi
 
 # Build the contexts JSON array from the comma-separated list, trimming spaces.
-CONTEXTS_JSON="$(python3 - "$CHECKS" <<'PY'
+CONTEXTS_JSON="$(python3 - "$CHECKS_VALUE" <<'PY'
 import json, sys
 print(json.dumps([c.strip() for c in sys.argv[1].split(",") if c.strip()]))
 PY
@@ -53,5 +59,20 @@ gh api -X PUT "repos/$OWNER/$REPO/branches/$BRANCH/protection" --input - <<JSON
 }
 JSON
 
-echo "Done. Verify with:"
-echo "  gh api repos/$OWNER/$REPO/branches/$BRANCH/protection --jq '.required_status_checks.contexts'"
+ACTUAL_JSON="$(gh api "repos/$OWNER/$REPO/branches/$BRANCH/protection" \
+  --jq '.required_status_checks.contexts | sort')"
+EXPECTED_JSON="$(python3 - "$CONTEXTS_JSON" <<'PY'
+import json, sys
+print(json.dumps(sorted(json.loads(sys.argv[1])), separators=(",", ":")))
+PY
+)"
+ACTUAL_COMPACT="$(python3 - "$ACTUAL_JSON" <<'PY'
+import json, sys
+print(json.dumps(json.loads(sys.argv[1]), separators=(",", ":")))
+PY
+)"
+if [ "$ACTUAL_COMPACT" != "$EXPECTED_JSON" ]; then
+  echo "protect-branch: verification failed: expected $EXPECTED_JSON, got $ACTUAL_COMPACT" >&2
+  exit 1
+fi
+echo "Done. Verified required checks: $ACTUAL_COMPACT"

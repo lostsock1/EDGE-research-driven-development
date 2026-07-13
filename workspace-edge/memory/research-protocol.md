@@ -48,10 +48,10 @@ Every dual-research note must end with a `## Cross-reference` section:
 Every research note YAML frontmatter must include:
 
 ```yaml
-research_method: dual | edge-only
+research_method: dual
 ```
 
-This gives a filterable audit trail of which notes had two oracles and which didn't.
+This gives a filterable audit trail; an incomplete single-oracle attempt is recorded as a blocker in prose, not mislabeled as completed research.
 
 ## Thread routing
 

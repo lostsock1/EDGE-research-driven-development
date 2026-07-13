@@ -24,9 +24,9 @@ Everything lives in a single workspace directory (`~/.openclaw/workspace-${AGENT
 ├── SOUL.md, AGENTS.md, HEARTBEAT.md, ...    (workspace docs)
 ├── personas/                                (FRONTIER, AGAINST, INFINITY, BAYESIAN)
 ├── templates/                               (north-star-spec.md, etc.)
-├── projects/<slug>/                         (git clone of project repo)
-├── context/<slug>/notes/                    (EDGE research context)
-├── config/edge-rdd/config.env               (dispatch config: primary project + model ladder)
+├── projects/<slug>/                         (EDGE charter/resume/notes; never the repo clone)
+├── config/edge-rdd/config.env               (shared models/timeouts/variant policy)
+├── config/edge-rdd/<slug>.env               (project repo/chat/branch/check identity)
 ├── config/edge-rdd/research.env             (OpenScience research dispatch)
 ├── config/edge-rdd/gate.env                 (PR gate hub)
 ├── config/opencode/agents/code-monkeys/     (coder, reviewer, _shared)
@@ -46,7 +46,7 @@ System paths (`~/.config/edge-rdd`, `~/.openclaw/skills/gate`, etc.) are symlink
 | **Coder agents** | `opencode/agents/code-monkeys/` | Primary coder + independent read-only reviewer + shared doctrine. Permission maps tuned for **non-interactive** dispatch (no `ask` traps), with hard denies on merges, force-pushes, and secrets |
 | **Research agent** | `openclaw/agent.edge.json5`, `openclaw/topic.project-thread.json5` | OpenClaw agent definition + Telegram topic binding with the full async-dispatch operating instructions baked into the system prompt |
 | **Agent workspace** | `workspace-edge/` | Project charter (the 10-point evidence-driven engineering operating loop) + the plain-lingo **communication contract** + RESUME.md restart packet |
-| **North-star doc** | `workspace-edge/SUPERIOR_ARCHITECTURE.md` | The theoretical best-known architecture, seeded per project **outside** the repo — fed by external research *and* the project's own internal evidence (evals/ADRs/experiments/reality-feedback), distilled to hardware-independent mechanism, promoted into the repo only through the staging pipeline. The unconstrained design track that pulls the roadmap forward without ever blurring into it |
+| **North-star doc + validator** | `workspace-edge/SUPERIOR_ARCHITECTURE.md`, `scripts/validate-superior-architecture.py` | The theoretical best-known architecture, seeded per project **outside** the repo — fed by external research *and* the project's own internal evidence (evals/ADRs/experiments/reality-feedback), distilled to hardware-independent mechanism, promoted into the repo only through the staging pipeline. The unconstrained design track that pulls the roadmap forward without ever blurring into it |
 | **North-star spec template** | `workspace-edge/templates/north-star-spec.md` | The prompt template the operator uses at kickoff to generate a project's dense **north-star specification** — the authoritative product definition the research agent distills the Mission and Superior Architecture from. Full 28-section prompt, a self-contained short variant, and composable technical/product/adversarial add-ons |
 | **Note templates** | `workspace-edge/templates/` | Five additional Obsidian-compatible templates (daily note, inbox note, project, research note) — deployed by install.sh and refreshed on every apply |
 | **Workspace docs** | `workspace-edge/AGENTS.md`, `workspace-edge/IDENTITY.md`, `workspace-edge/SKILL-REGISTRY.md` | Comprehensive workspace guide (persona system, project kickoff, install/portability, skill registry), stable identity card, skill tracking framework — seeded by install.sh, never overwritten |
@@ -55,7 +55,7 @@ System paths (`~/.config/edge-rdd`, `~/.openclaw/skills/gate`, etc.) are symlink
 | **Repo handoff docs** | `project-repo/docs/agent/` | The git-tracked protocol both sides read: `PROJECT_STATE` · `TASKS` · `QUALITY_GATES` · `KNOWLEDGE_STAGING` · `RESEARCH_TRANSFER` · `EDGE_COLLABORATION` |
 | **GitHub gate** | `github/protect-branch.sh`, `project-repo/.github/workflows/ci.yml.example` | One-command branch protection (required checks, up-to-date branch, no force-push, admins included, 0 approvals — *you* are the approval) |
 | **PR gate** | `scripts/edge-pr-gate.sh` | Run `/gate sweep` to check every project repo — green PRs, CI verdicts, stray branches — and post **one-tap approval buttons** (per item, plus **Do-all**), each with a what/consequence/why brief, into **one gate thread**. You tap ✅ (or react 👍, or type `/gate`), the agent re-verifies and executes the merge / branch cleanup, and every repo converges back to **trunk-only**. See [The PR gate](#the-pr-gate-approve-merges-with-one-tap) |
-| **Installer** | `install.sh`, `uninstall.sh`, `template.env.example` | Workspace-first install: creates `~/.openclaw/workspace-${AGENT_ID}/`, clones project repo, creates symlinks, generates the `config.env`/`gate.env`/`research.env` configs. Uninstall with `--purge` (keeps repos) or `--purge-all` (removes everything) |
+| **Installer** | `install.sh`, `uninstall.sh`, `template.env.example` | Workspace-first install: keeps the repo checkout separate from EDGE notes, creates symlinks, and generates shared `config.env`, per-project `<slug>.env`, `gate.env`, and `research.env`. Uninstall with `--purge` (keeps repos) or `--purge-all` (removes everything) |
 | **Thread bootstrap** | `scripts/kickoff.sh`, `messages/` | One-shot first-boot handshake: **preflights the GitHub connection** (gh auth, reachable repo, matching clone, protection), then posts the development-kickoff + pinnable **command palette** into the project thread |
 
 ## The five ideas that make it work
@@ -70,14 +70,14 @@ System paths (`~/.config/edge-rdd`, `~/.openclaw/skills/gate`, etc.) are symlink
 
 The loop ends at a human decision — but that decision shouldn't require opening GitHub. Run `/gate sweep` (or just `gate sweep` in chat) — `scripts/edge-pr-gate.sh sweep` checks **every** configured project — projects are simply the `*.env` files in `~/.config/edge-rdd/`, the same ones the dispatch wrapper reads, so there is no second registry to drift — and for each repo looks at:
 
-- **open PRs** and their CI verdict (green / red / pending / draft),
+- **open PRs** and their strict CI verdict (every check green, every per-project `RDD_REQUIRED_CHECKS` context present/pass; no-CI is never chat-mergeable), plus the current-head reviewer marker,
 - **every non-trunk branch**, classified: active PR head · leftover of a merged/closed PR · orphan with or without unique commits.
 
 Anything actionable — a green PR ready to merge, a stale branch to prune — becomes a **single-use pending action**, and the sweep posts one approval message per project into **one gate thread** (`RDD_GATE_TG_*` in `workspace/config/edge-rdd/gate.env` — point it at your EDGE coordination thread so every project's asks land in one place instead of scattered across per-project threads). Each ask carries an inline button per action **and a plain-language brief: what the action does, its consequence, and why it's being offered** — so you're never approving a bare button. A snooze button rides along; unchanged asks are not re-posted for 24h; a clean project posts nothing. The declared goal is **trunk-only repos**: merged work in, dead branches gone.
 
 **Approving is one tap.** A button tap delivers its callback (`eg:<id>`) to the research agent, which runs `edge-pr-gate.sh act <id>`. A 👍/✅ reaction on the gate message — or replying "approve" — works too (`pending` resolves which action; if it's ambiguous the agent asks). `act` then **re-verifies at execution time** — PR still open, checks still green, branch still stale — and only then executes (`gh pr merge --squash --delete-branch`, or a remote branch delete), posts the outcome back, and burns the action id.
 
-**What did NOT change:** nothing merges without your explicit approval. The approval surface moved from the GitHub UI to a button in your chat; the executor moved from your thumb to the agent — *after* your tap. Actions are minted only by the sweep from observed repo state, are single-use, re-verify before executing (a stale button can never merge a PR whose CI went red), and the agent is under doctrine to never run `gh pr merge` or delete branches outside `act`. Red and pending-CI PRs are never offered as actions — they ride the normal `fix the red PR` loop.
+**What did NOT change:** nothing merges without your explicit approval. The approval surface moved from the GitHub UI to a button in your chat; the executor moved from your thumb to the agent — *after* your tap. Actions are minted only by the sweep from observed repo state, are single-use, re-verify before executing (a stale button can never merge a PR whose CI went red), and the agent is under doctrine to never run `gh pr merge` or delete branches outside `act`. Red, pending, missing-required-check, no-CI, and reviewer-blocked PRs are never offered as actions — they ride the normal `fix the red PR` loop.
 
 **Clear a whole project in one tap.** When a project has two or more pending items, the ask also carries a **"☑️ Do all N of the above"** button. Approving it runs every pending action for that project at once — each still independently re-verified before it executes, so a batch approval can never force through a PR that has since gone red.
 
@@ -148,15 +148,15 @@ Linux server · [OpenClaw](https://docs.openclaw.ai) gateway with a Telegram cha
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/you/newproject ~/.openclaw/workspace-edge/projects/newproject
+git clone https://github.com/you/newproject ~/projects/NewProject
 
-# 2. Create dispatch config
-cp ~/.openclaw/workspace-edge/config/edge-rdd/rag.env \
+# 2. Create project-identity config (shared model policy is inherited)
+cp ~/.openclaw/workspace-edge/config/edge-rdd/myproject.env \
    ~/.openclaw/workspace-edge/config/edge-rdd/newproject.env
 # Edit: RDD_REPO_DIR, RDD_TG_THREAD, RDD_DOCS_DIR, RDD_MAIN_BRANCH
 
 # 3. Create notes directory
-mkdir -p ~/.openclaw/workspace-edge/context/newproject/notes/
+mkdir -p ~/.openclaw/workspace-edge/projects/newproject/notes/
 
 # Gate picks it up automatically (scans config/edge-rdd/*.env)
 ```
@@ -165,8 +165,8 @@ mkdir -p ~/.openclaw/workspace-edge/context/newproject/notes/
 
 ```bash
 ./uninstall.sh              # remove symlinks only (safe, reversible)
-./uninstall.sh --purge      # remove workspace too (keeps project repos)
-./uninstall.sh --purge-all  # remove everything including project repos
+./uninstall.sh --purge      # remove runtime workspace, preserve EDGE project notes
+./uninstall.sh --purge-all  # remove the entire EDGE workspace (external repos stay untouched)
 ```
 
 ## Daily driving
