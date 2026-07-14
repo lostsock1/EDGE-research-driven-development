@@ -68,5 +68,5 @@ This gives a filterable audit trail; an incomplete single-oracle attempt is reco
 ## Storage
 
 - EDGE research notes: `projects/<slug>/notes/<topic>-research.md`
-- OpenScience packets (accepted): `~/edge-research-kb/<project>/`
+- OpenScience packets (accepted): `projects/<slug>/notes/`
 - This protocol: `memory/research-protocol.md`

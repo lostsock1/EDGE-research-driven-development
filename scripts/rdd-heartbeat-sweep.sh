@@ -7,6 +7,8 @@
 #      workspace projects/<slug>/ dirs containing a PROJECT.md (pseudo-dirs like
 #      the research mailbox are skipped), or set RDD_SWEEP_PROJECTS="slug[:arch-path] …"
 #      to pin the list and any non-default artifact locations explicitly.
+#      Also nags when research notes are newer than the project's last
+#      Superior Architecture synthesis (evidence not yet folded in).
 #   2. Research-loop hygiene: stale un-dispatched assignments (a successful
 #      dispatch archives its assignment, so anything old here means a dispatch
 #      died silently) and packets pending operator Accept/Reject for >24h.
@@ -35,19 +37,38 @@ OUT="$(
       --workspace . --project "$slug" --heartbeat "$@" 2>&1
     echo "--- $slug rc=$? ---"
   }
+  # A note or accepted packet whose mtime post-dates the Superior Architecture
+  # artifact is evidence not yet folded in. The validator can't see unbound
+  # files; this nag closes that hole. A synthesis pass rewrites the artifact,
+  # which clears the nag naturally. (mtime is a nag signal, not proof — restores
+  # can produce transient noise; fold in or touch the artifact after judging.)
+  research_newer_than_synthesis() {
+    local slug="$1" arch="$2"
+    [ -f "$arch" ] || return 0
+    while IFS= read -r f; do
+      echo "ATTENTION: $slug research newer than Superior Architecture synthesis: $(basename "$f") — fold in and re-bind"
+    done < <(find "projects/$slug/notes" -maxdepth 1 -name '*.md' ! -name 'SUPERIOR_ARCHITECTURE.md' -newer "$arch" 2>/dev/null | sort)
+  }
+  sweep_project() {
+    local slug="$1" arch="${2:-}"
+    if [ -n "$arch" ]; then
+      run_validator "$slug" --architecture-path "$arch"
+    else
+      arch="projects/$slug/notes/SUPERIOR_ARCHITECTURE.md"
+      run_validator "$slug"
+    fi
+    research_newer_than_synthesis "$slug" "$arch"
+  }
   if [ -n "${RDD_SWEEP_PROJECTS:-}" ]; then
     for entry in $RDD_SWEEP_PROJECTS; do
       slug="${entry%%:*}"; arch="${entry#*:}"
-      if [ "$arch" != "$entry" ] && [ -n "$arch" ]; then
-        run_validator "$slug" --architecture-path "$arch"
-      else
-        run_validator "$slug"
-      fi
+      [ "$arch" = "$entry" ] && arch=""
+      sweep_project "$slug" "$arch"
     done
   else
     for d in projects/*/; do
       [ -f "$d/PROJECT.md" ] || continue
-      run_validator "$(basename "$d")"
+      sweep_project "$(basename "$d")"
     done
   fi
 

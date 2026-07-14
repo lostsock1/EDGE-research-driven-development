@@ -75,7 +75,7 @@ EDGE tests ideas through three separate oracles, ordered by the strength of evid
 
 1. **Gapped lab** (`lab/lab-run.sh`) — EDGE designs the test. Ephemeral Docker container, pre-registered protocol, air-gapped, auto-destroyed. Weakest evidence (EDGE can shape the test) but cheapest and fastest.
 2. **Implementation oracle** (`edge-coder-run.sh`) — Reality designs the test. A coder agent implements the work order on a feature branch; the seam that wasn't there, the test that failed, the interface that didn't fit — these are refutations EDGE couldn't shape. Highest-grade evidence.
-3. **OpenScience** (`openscience-research.sh` + the `/research` skill) — External research sandbox: a local, systemd-hardened, research-only workbench (see `openscience/README.md`). Async packets return to the originating thread with Accept/Reject buttons; accepted packets land in `~/edge-research-kb/<project>/`. Feeds the research pool with mechanisms from papers and repos, and pairs with the agent's own web research under the dual-research protocol (`docs/research-protocol.md`).
+3. **OpenScience** (`openscience-research.sh` + the `/research` skill) — External research sandbox: a local, systemd-hardened, research-only workbench (see `openscience/README.md`). Async packets return to the originating thread with Accept/Reject buttons; accepted packets land in the workspace projects tree (`projects/<project>/notes/`), where the Superior Architecture validator can hash-bind them as evidence. Feeds the research pool with mechanisms from papers and repos, and pairs with the agent's own web research under the dual-research protocol (`docs/research-protocol.md`).
 
 A finding promotes: lab survival → implementation survival → merged and proven.
 

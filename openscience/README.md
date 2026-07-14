@@ -10,7 +10,8 @@ and the two answers are cross-referenced.
 OpenScience never writes code, opens PRs, dispatches coders, deploys, or
 messages anyone. A finished **research packet** posts back to the originating
 chat thread with **Accept / Reject** buttons; only an accepted packet enters
-the knowledge base (`~/edge-research-kb/<project>/`), and promoting a finding
+the knowledge base (`projects/<project>/notes/` in the research agent's
+workspace), and promoting a finding
 into an implementation work order remains a separate, explicit step through
 the normal staging ladder.
 

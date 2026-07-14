@@ -165,7 +165,7 @@ every project thread can dispatch sandboxed external research:
 | `/research assign "<question>"` | async dispatch; returns `DISPATCHED <ERA-id>`, the finished packet posts back with **Accept / Reject** buttons |
 | `/research list` / `/research status` | assignments, packets awaiting approval, workbench health |
 | `/research show OSR-<id>` | print a packet |
-| `/research accept <handle>` | promote the packet into the knowledge base (`~/edge-research-kb/<project>/`) — single-use |
+| `/research accept <handle>` | promote the packet into the knowledge base (`projects/<project>/notes/`) — single-use |
 | `/research reject <handle>` | archive without adding to the KB |
 | `/research followup <id> "<q>"` | follow-up question referencing a prior packet |
 

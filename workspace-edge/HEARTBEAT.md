@@ -27,8 +27,11 @@ bash {{HOME}}/.openclaw/shared-scripts/rdd-heartbeat-sweep.sh
 
 The sweep validates every workspace project (dirs under `projects/` with a
 `PROJECT.md`; pin the list or non-default artifact paths via `RDD_SWEEP_PROJECTS`),
-flags stale research assignments (a dispatch that died after `DISPATCHED`) and
-packets waiting >24h for operator Accept/Reject, and checks OpenScience health.
+nags when research notes are newer than a project's last Superior Architecture
+synthesis (evidence not yet folded in — fold it in and re-bind, or touch the
+artifact after judging), flags stale research assignments (a dispatch that died
+after `DISPATCHED`) and packets waiting >24h for operator Accept/Reject, and
+checks OpenScience health.
 Run log: `~/.local/state/edge-rdd/arch-sweep.log`.
 
 PR gate sweeps remain on-demand via `/gate sweep` and automatically follow a
