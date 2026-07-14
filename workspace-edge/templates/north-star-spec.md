@@ -17,7 +17,10 @@ produce the operator's north-star specification for a new project.
    agent, then attests that this is the accepted product authority by adding
    `authority: operator-supplied`. Agents must never create or infer that attestation.
 5. The research agent then distills it: charter Mission first, then
-   `notes/SUPERIOR_ARCHITECTURE.md` synthesis. Promotion into the repo stays gated through
+   `notes/SUPERIOR_ARCHITECTURE.md` synthesis — binding `north_star_sha256` and
+   `local_source_sha256` (exact file bytes) in the architecture frontmatter so evidence
+   drift is detectable. Accepted research packets land in the same `notes/` dir and are
+   citable/hash-bindable as local sources. Promotion into the repo stays gated through
    `{{DOCS_DIR}}/KNOWLEDGE_STAGING.md` → `RESEARCH_TRANSFER.md` → `TASKS.md`.
    **The spec and the north-star doc never enter the repo.**
 
