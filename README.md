@@ -2,6 +2,11 @@
 
 **A complete, battle-tested scaffolding for running an autonomous research → implementation → PR pipeline from a chat thread, on your own server, with a human holding the only merge button.**
 
+[![template-ci](https://github.com/lostsock1/EDGE-evidence-driven-git-engineering/actions/workflows/ci.yml/badge.svg)](https://github.com/lostsock1/EDGE-evidence-driven-git-engineering/actions/workflows/ci.yml)
+![Runs on](https://img.shields.io/badge/runs%20on-OpenClaw%20%2B%20opencode-blueviolet)
+![Extracted from](https://img.shields.io/badge/extracted%20from-production-success)
+[![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
+
 One Telegram thread. A research agent (**EDGE**, running in [OpenClaw](https://openclaw.ai), animated by the **FRONTIER** persona — a truth-seeking operating philosophy that pre-registers its experiments and prizes refutation over confirmation) that studies your project, drafts work orders, and asks for your *go*. A coder team (**code-monkeys**, running in [opencode](https://opencode.ai)) that implements on feature branches and opens PRs. GitHub branch protection + CI as the mechanical quality gate. You read a plain-language summary on your phone and tap **merge** — in the GitHub UI, or right in the thread on a **PR-gate approval button** (the agent executes the merge, but only after your tap).
 
 ```text
@@ -14,6 +19,21 @@ you (Telegram) ──"go"──▶ EDGE ──dispatch──▶ wrapper ──ti
 ```
 
 This template is extracted from a production setup running commercial-grade software development through this exact loop. Every guard in it exists because the unguarded version failed at least once.
+
+## Contents
+
+- [Workspace-first design](#workspace-first-design)
+- [What's in the box](#whats-in-the-box)
+- [The five ideas that make it work](#the-five-ideas-that-make-it-work)
+- [The PR gate: approve merges with one tap](#the-pr-gate-approve-merges-with-one-tap)
+- [Two tracks: what ships vs. the north star](#two-tracks-what-ships-vs-the-north-star)
+- [The personality: FRONTIER](#the-personality-frontier)
+- [Quickstart](#quickstart)
+- [Daily driving](#daily-driving)
+- [Hard-won lessons baked in](#hard-won-lessons-baked-in)
+- [Safety posture](#safety-posture)
+- [Documentation](#documentation)
+- [License](#license)
 
 ## Workspace-first design
 
@@ -198,6 +218,15 @@ Every substantive reply follows the communication contract: **plain-lingo summar
 ## Safety posture
 
 Permissions stay **ON** everywhere — `--dangerously-skip-permissions` is forbidden by doctrine and unnecessary by design. Secrets (`.env*`, `**/secrets/**`, `**/.ssh/**`, `**/credentials/**`) are hard-denied at read *and* edit level in every agent. Merges, releases, force-pushes, and history rewrites are denied to agents and rejected by GitHub. Elevated chat-exec is allowlisted to the operator's own account id only. The PR gate does not weaken this: a merge still requires the operator's explicit tap, executes only through single-use, re-verified gate actions, and the coder agents' own merge denies stay in place.
+
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [docs/SETUP.md](docs/SETUP.md) | End-to-end install: OpenClaw merge, CI, branch protection, kickoff, smoke test |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | The why behind every design decision — including the known traps, learned the hard way |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Daily driving, command reference, troubleshooting |
+| [docs/research-protocol.md](docs/research-protocol.md) | The dual-research protocol for the OpenScience companion |
 
 ## License
 
