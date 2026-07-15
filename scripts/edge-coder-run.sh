@@ -14,8 +14,10 @@
 #                     returns in ~1s.
 #   --fg:             foreground mode — blocks and prints everything to stdout
 #                     (debugging / operator use). CI watcher still runs detached.
-#                     Foreground uses shorter per-tier timeouts so the worst case
-#                     stays inside the dispatching agent's exec-timeout budget.
+#                     Foreground uses the shorter RDD_TIMEOUTS_FG probe budget AND
+#                     a shorter work budget (RDD_WORK_TO_FG, default 900s) so the
+#                     worst case stays well below the async budget (RDD_WORK_TO_BG,
+#                     default 3600s). Set RDD_WORK_TO_FG to fit your exec-timeout.
 #   status:           show lock holder + recent runs.
 #
 # CONFIGURATION — layered at startup:
@@ -113,6 +115,12 @@ read -r -a VARIANTS    <<< "${RDD_VARIANTS:-}"
 # RDD_MODELS. The real task gets WORK_TO (below) once a tier answers its probe.
 read -r -a TIMEOUTS_BG <<< "${RDD_TIMEOUTS_BG:-60 60}"
 read -r -a TIMEOUTS_FG <<< "${RDD_TIMEOUTS_FG:-60 60}"
+# Real-task work budget once a tier passes its probe. Mode-aware: the probe
+# timeouts above never bounded the actual work, so a --fg run could otherwise
+# block for the full async hour. Async keeps the long budget; --fg gets a shorter
+# one. Both operator-overridable; seconds.
+WORK_TO_BG=${RDD_WORK_TO_BG:-3600}
+WORK_TO_FG=${RDD_WORK_TO_FG:-900}
 VARIANT_POLICY=${RDD_VARIANT_POLICY:-static}
 EFFORT_PROFILE=${EDGE_CODER_EFFORT_PROFILE:-}
 LOG=${RDD_LOG:-$HOME/.local/state/edge-rdd/edge-coder-run.log}
@@ -170,19 +178,33 @@ except Exception:
 if not checks:
     print("no-ci\tno checks reported")
     raise SystemExit
+# gh maps each check's state to a bucket: pass=SUCCESS, skipping=SKIPPED/NEUTRAL,
+# fail=ERROR/FAILURE/TIMED_OUT/ACTION_REQUIRED, cancel=CANCELLED, pending=the rest
+# (QUEUED/IN_PROGRESS/...). skipping and cancel are TERMINAL — they never turn
+# into pass — so treating every non-pass bucket as pending wedges the verdict
+# forever on the very common path-filtered / conditional job. A skipped or
+# neutral check is done and not failing (treat as satisfied); a cancelled check
+# did not succeed (treat as red).
 by_name = {c.get("name"): c.get("bucket") for c in checks}
-if any(c.get("bucket") == "fail" for c in checks):
-    failed = ", ".join(c.get("name", "unnamed") for c in checks if c.get("bucket") == "fail")
-    print(f"red\tfailing checks: {failed}")
+failed = [c.get("name", "unnamed") for c in checks if c.get("bucket") == "fail"]
+cancelled = [c.get("name", "unnamed") for c in checks if c.get("bucket") == "cancel"]
+if failed or cancelled:
+    parts = []
+    if failed:
+        parts.append("failing: " + ", ".join(failed))
+    if cancelled:
+        parts.append("cancelled: " + ", ".join(cancelled))
+    print("red\t" + "; ".join(parts))
     raise SystemExit
 missing = [name for name in required if name not in by_name]
 if missing:
     print("missing-required\tmissing required: " + ", ".join(missing))
     raise SystemExit
-if any(c.get("bucket") != "pass" for c in checks):
-    print("pending\tchecks not all passed")
+pending = [c.get("name", "unnamed") for c in checks if c.get("bucket") not in ("pass", "skipping")]
+if pending:
+    print("pending\tstill running: " + ", ".join(pending))
     raise SystemExit
-print("green\tall checks passed; required contexts present")
+print("green\tall checks passed or skipped; required contexts present")
 PY
 }
 
@@ -208,6 +230,13 @@ if [ "${1:-}" = "status" ]; then
   done
   echo "--- ledger tail ---"
   tail -5 "$LOG" 2>/dev/null
+  exit 0
+fi
+if [ "${1:-}" = "ci-verdict" ]; then
+  # Read-only: classify a `gh pr checks --json name,bucket` payload with the same
+  # strict logic the CI watcher uses. Handy for operators debugging a verdict and
+  # for regression tests. RDD_REQUIRED_CHECKS still applies.
+  strict_ci_verdict "${2:-[]}"
   exit 0
 fi
 while [ $# -gt 0 ]; do
@@ -340,11 +369,20 @@ LOCK="$LOCKDIR/edge-coder-$(printf '%s' "$DIR" | md5sum | cut -c1-12).lock"
 # ---- the actual dispatch (runs in worker for async, inline for --fg) -----------
 run_dispatch() {
   local -a TIMEOUTS
-  if [ "$MODE" = fg ]; then TIMEOUTS=("${TIMEOUTS_FG[@]}"); else TIMEOUTS=("${TIMEOUTS_BG[@]}"); fi
+  local WORK_TO
+  if [ "$MODE" = fg ]; then
+    TIMEOUTS=("${TIMEOUTS_FG[@]}"); WORK_TO="$WORK_TO_FG"
+  else
+    TIMEOUTS=("${TIMEOUTS_BG[@]}"); WORK_TO="$WORK_TO_BG"
+  fi
 
   echo "[$(ts)] DISPATCH id=${RUN_ID:-fg} mode=$MODE effort=${EFFORT_PROFILE:-static} dir=$DIR task=${TASK:0:120}" >> "$LOG"
-  local HEAD_BEFORE
+  local HEAD_BEFORE TREE_BEFORE
   HEAD_BEFORE="$(git -C "$DIR" rev-parse HEAD 2>/dev/null || echo '')"
+  # Snapshot tree dirtiness at dispatch start so a tree that was ALREADY dirty
+  # here is not later mis-reported to a fallback tier as partial work from a
+  # previous attempt. Only changes since this snapshot count as partial work.
+  TREE_BEFORE="$(git -C "$DIR" status --porcelain 2>/dev/null)"
 
   # Dispatch protocol: PR-based branch flow (trunk is protected), CI runs the
   # tests on the PR, required reviewer dispatch (model-reported trust), durable EDGE feedback via
@@ -417,20 +455,23 @@ PROTO
       VARIANT_ARGS=(--variant "$V")
     fi
 
-    # Partial-work handoff: if an earlier tier moved HEAD or left a dirty tree,
-    # tell this tier to continue rather than restart.
+    # Partial-work handoff: only when an EARLIER TIER in THIS dispatch actually
+    # changed the repo — HEAD moved, or the tree differs from the dispatch-start
+    # snapshot. Comparing against TREE_BEFORE (not absolute dirtiness) stops a
+    # pre-existing dirty tree from being narrated as a previous attempt.
     PARTIAL=""
-    local HEAD_NOW DIRTY
+    local HEAD_NOW TREE_NOW
     HEAD_NOW="$(git -C "$DIR" rev-parse HEAD 2>/dev/null || echo '')"
-    DIRTY="$(git -C "$DIR" status --porcelain 2>/dev/null | head -1)"
-    if [ $i -gt 1 ] && { [ "$HEAD_NOW" != "$HEAD_BEFORE" ] || [ -n "$DIRTY" ]; }; then
-      PARTIAL="IMPORTANT — PARTIAL WORK EXISTS from a previous attempt that timed out:
-the working tree and/or new commits already contain progress on this exact task.
-FIRST run git log --oneline -5 and git status, read what exists, and CONTINUE
-from it. Do NOT restart from scratch and do NOT revert existing progress.
+    TREE_NOW="$(git -C "$DIR" status --porcelain 2>/dev/null)"
+    if [ $i -gt 1 ] && { [ "$HEAD_NOW" != "$HEAD_BEFORE" ] || [ "$TREE_NOW" != "$TREE_BEFORE" ]; }; then
+      PARTIAL="IMPORTANT — PARTIAL WORK EXISTS from an earlier model tier in this
+dispatch that did not finish: the working tree and/or new commits already contain
+progress on this exact task. FIRST run git log --oneline -5 and git status, read
+what exists, and CONTINUE from it. Do NOT restart from scratch and do NOT revert
+existing progress.
 
 "
-      echo "[$(ts)] PARTIAL-WORK handoff to tier $M variant=${V:-default} (HEAD moved or dirty tree)" >> "$LOG"
+      echo "[$(ts)] PARTIAL-WORK handoff to tier $M variant=${V:-default} (HEAD moved or tree changed since dispatch start)" >> "$LOG"
     fi
 
     echo "[$(ts)] TRY model=$M variant=${V:-default} timeout=${TO}s" >> "$LOG"
@@ -467,8 +508,7 @@ print("".join(texts))
       continue
     fi
     echo "[$(ts)] PROBE-OK model=$M — dispatching real task" >> "$LOG"
-    # --- Real task: model is alive, give it work time ---
-    WORK_TO=3600
+    # --- Real task: model is alive, give it the mode-aware work budget (above) ---
     # Model override per tier — the wrapper's RDD_MODELS chain IS the fallback.
     # Reviewer subagent inherits the model from opencode config.
     # OCRC captures opencode/timeout's own exit code — the pipeline otherwise
@@ -509,7 +549,7 @@ for line in sys.stdin:
 if has_error or not has_text or not "".join(texts).strip():
     sys.exit(1)
 print("".join(texts))
-')"
+' 2>>"$ERRTMP")"
     RC=$?
     OPENCODE_RC="$(cat "$OCRC" 2>/dev/null || echo '')"
     rm -f "$OCRC"
