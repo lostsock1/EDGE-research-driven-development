@@ -800,10 +800,34 @@ fi
 
 RUN_ID="run-$(date +%Y%m%d-%H%M%S)-$RANDOM"
 echo "pid=parent started=$(ts) mode=bg id=$RUN_ID effort=${EFFORT_PROFILE:-static} task=${TASK:0:80}" > "$LOCK.holder"
-setsid bash "$0" --worker "$RUN_ID" --dir "$DIR" "$TASK" \
-  >>"$RUNS_DIR/$RUN_ID.log" 2>&1 </dev/null &
-disown 2>/dev/null || true
-echo "[$(ts)] DETACHED id=$RUN_ID pid=$! dir=$DIR" >> "$LOG"
+# Isolate the background worker in its own transient systemd scope so a heavy
+# build (opencode + a pip install + qmd) gets a dedicated cgroup and memory
+# budget instead of inheriting — and starving — the cgroup of whatever spawned
+# this wrapper. When EDGE dispatches via the gateway's exec tool the worker would
+# otherwise land in openclaw-gateway.service's cgroup and, under its MemoryMax,
+# stall the gateway's event loop (Telegram outage, 2026-07-15). The scope is a
+# sibling cgroup under edge-coder.slice with its own caps, so a runaway build
+# OOMs itself, never the gateway. Falls back to a bare setsid if systemd-run
+# can't create the scope, so a systemd/D-Bus hiccup never blocks dispatch.
+# Disable with RDD_SCOPE=0; tune caps via RDD_SCOPE_MEMORY_{HIGH,MAX,SWAP_MAX}.
+if [ "${RDD_SCOPE:-1}" = 1 ] && command -v systemd-run >/dev/null 2>&1 \
+   && systemd-run --user --scope --quiet --collect -- true >/dev/null 2>&1; then
+  setsid systemd-run --user --scope --quiet --collect \
+    --unit="edge-coder-$RUN_ID" --slice=edge-coder.slice \
+    -p MemoryHigh="${RDD_SCOPE_MEMORY_HIGH:-3G}" \
+    -p MemoryMax="${RDD_SCOPE_MEMORY_MAX:-4G}" \
+    -p MemorySwapMax="${RDD_SCOPE_MEMORY_SWAP_MAX:-2G}" \
+    -- bash "$0" --worker "$RUN_ID" --dir "$DIR" "$TASK" \
+    >>"$RUNS_DIR/$RUN_ID.log" 2>&1 </dev/null &
+  disown 2>/dev/null || true
+  echo "[$(ts)] DETACHED id=$RUN_ID pid=$! dir=$DIR scope=edge-coder-$RUN_ID.scope memMax=${RDD_SCOPE_MEMORY_MAX:-4G}" >> "$LOG"
+else
+  [ "${RDD_SCOPE:-1}" = 1 ] && echo "[$(ts)] WARN id=$RUN_ID systemd-run scope unavailable — worker runs unisolated in caller cgroup" >> "$LOG"
+  setsid bash "$0" --worker "$RUN_ID" --dir "$DIR" "$TASK" \
+    >>"$RUNS_DIR/$RUN_ID.log" 2>&1 </dev/null &
+  disown 2>/dev/null || true
+  echo "[$(ts)] DETACHED id=$RUN_ID pid=$! dir=$DIR scope=none" >> "$LOG"
+fi
 echo "DISPATCHED $RUN_ID — coder is running in the background."
 echo "Completion summary (model, branch, commits, PR) and the CI verdict will be posted to the project thread automatically."
 echo "Full output will land in: $RUNS_DIR/$RUN_ID.log"
