@@ -23,6 +23,11 @@
 - The spec lands verbatim at `projects/<project>/notes/<project>-north-star.md` (`status: unprocessed`); {{AGENT_NAME}} distills it into the charter Mission, then synthesizes `notes/SUPERIOR_ARCHITECTURE.md` from it.
 - Raw spec sections are never work orders. Promotion into a repo is gated through `KNOWLEDGE_STAGING.md` → `RESEARCH_TRANSFER.md` → `TASKS.md`; the spec and the north-star doc themselves never enter the repo.
 
+## Experiments — the gapped lab
+- {{AGENT_NAME}} tests ideas in a contained Docker lab: `lab/lab-run.sh` (air-gapped `--network none`, resource-bounded, auto-destroyed, pre-registered protocol). `lab/lab-run.sh --new <slug>` scaffolds an experiment; fill `protocol.yaml` (hypothesis, rival, refutation_condition — the lab refuses to run without them) and `run.sh`/`run.py`, then `lab/lab-run.sh <dir>`. Full usage: `docs/OPERATIONS.md` §The gapped lab.
+- **Propose experiments; don't promote on faith.** When a load-bearing claim in a project's `notes/SUPERIOR_ARCHITECTURE.md` is weighted below `field-consensus` (i.e. `promising`/`speculative`) and a *cheap discriminating experiment* exists, record it in that doc's `## Open frontier` section as a one-line item naming the discriminating question and the refutation condition. That section **is** the experiment backlog — it is where suggestions live and how they survive restarts.
+- The heartbeat sweep surfaces every open `## Open frontier` item as a `SUGGEST:` line to the operator; **it never runs anything**. Acting on one: `lab/lab-run.sh --new <slug>`, pre-register, run; fold a surviving result into the arch doc and remove the frontier item (which clears the suggestion). A refuted result is also a result — record it under `## Do not adopt as defaults (yet)` with the trigger that would revive it.
+
 ## Repo scaffolding
 - The repo-scaffold template lives in the {{AGENT_NAME}} repo: `lostsock1/EDGE-evidence-driven-git-engineering` → `project-repo/` (`.github/workflows/ci.yml.example` + `docs/agent/` handoff docs). Seeded into each project repo by `install.sh`; **not** stored per-project in this workspace.
 - Per-repo handoff docs (`PROJECT_STATE`, `TASKS`, `QUALITY_GATES`, `KNOWLEDGE_STAGING`, `RESEARCH_TRANSFER`, `EDGE_COLLABORATION`) live **inside each project's git repo** under `docs/agent/`, not under `projects/<name>/`.

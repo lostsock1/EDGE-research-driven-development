@@ -49,6 +49,44 @@ OUT="$(
       echo "ATTENTION: $slug research newer than Superior Architecture synthesis: $(basename "$f") — fold in and re-bind"
     done < <(find "projects/$slug/notes" -maxdepth 1 -name '*.md' ! -name 'SUPERIOR_ARCHITECTURE.md' -newer "$arch" 2>/dev/null | sort)
   }
+  # Surface experiment candidates. A project's Superior Architecture "## Open
+  # frontier" section is where the research agent records discriminating questions
+  # it judged worth a contained lab experiment (persona: "spark targets worth a
+  # contained experiment"). Emit one SUGGEST per real open item so it does not
+  # sit un-tested. This NEVER runs anything. A listed item = still open; the item
+  # is removed once the lab result is folded in, and the sweep-level snapshot
+  # de-dups between beats so a standing suggestion is posted once, not every beat.
+  experiment_candidates() {
+    local slug="$1" arch="$2"
+    [ -f "$arch" ] || return 0
+    local relarch="${arch#./}"
+    awk '
+      function flush(   lbl) {
+        if (item == "") return
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", item)
+        if (item ~ /[A-Za-z0-9]/ && item != "…") {
+          lbl = item
+          if (match(lbl, /^\*\*[^*]+\*\*/)) { lbl = substr(lbl, 1, RLENGTH) }
+          else if (match(lbl, /\. /))       { lbl = substr(lbl, 1, RSTART) }
+          gsub(/\*/, "", lbl)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", lbl)
+          if (length(lbl) > 160) lbl = substr(lbl, 1, 157) "..."
+          print lbl
+        }
+        item = ""
+      }
+      /^##[[:space:]]+Open frontier/ { insec=1; next }
+      /^##[[:space:]]/               { if (insec) flush(); insec=0; next }
+      !insec { next }
+      /^[[:space:]]*-[[:space:]]+/ { flush(); item=$0; sub(/^[[:space:]]*-[[:space:]]+/, "", item); next }
+      /^[[:space:]]*$/             { flush(); next }
+      /^[[:space:]]*(---+|\*\*\*+|<!--)/ { flush(); next }
+      item != "" { c=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, " ", c); item=item c; next }
+      END { flush() }
+    ' "$arch" | while IFS= read -r label; do
+      echo "SUGGEST: $slug — experiment worth running: ${label} (see ${relarch} '## Open frontier'; pre-register + run: lab/lab-run.sh --new <slug>)"
+    done
+  }
   sweep_project() {
     local slug="$1" arch="${2:-}"
     if [ -n "$arch" ]; then
@@ -58,6 +96,7 @@ OUT="$(
       run_validator "$slug"
     fi
     research_newer_than_synthesis "$slug" "$arch"
+    experiment_candidates "$slug" "$arch"
   }
   if [ -n "${RDD_SWEEP_PROJECTS:-}" ]; then
     for entry in $RDD_SWEEP_PROJECTS; do
@@ -91,7 +130,7 @@ OUT="$(
 )"
 
 echo "$OUT"
-n_issues=$(printf '%s\n' "$OUT" | grep -Ec '^(BLOCKED|ATTENTION)') || true
+n_issues=$(printf '%s\n' "$OUT" | grep -Ec '^(BLOCKED|ATTENTION|SUGGEST)') || true
 if [ -f "$SNAP" ] && [ "$OUT" = "$(cat "$SNAP")" ]; then
   echo "NO_CHANGE"
   verdict=NO_CHANGE

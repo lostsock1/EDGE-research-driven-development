@@ -54,6 +54,13 @@ aliases: [Superior Architecture, North-Star Architecture]
   mechanism or a stronger rival, OR (b) an internal eval / ADR / lab experiment / coder
   reality-feedback changes what "best" means. Do a synthesis pass; do not let it drift
   behind the dated notes that feed it.
+- **Populate the experiment backlog.** In every synthesis pass, for each load-bearing claim
+  weighted below `field-consensus` (`promising`/`speculative`) that a *cheap discriminating
+  experiment* could resolve, add an `## Open frontier` item naming the discriminating
+  question and the refutation condition. The heartbeat sweep surfaces open items to the
+  operator as experiment suggestions (`SUGGEST:`); it never runs them. Remove an item once
+  its result is folded in (a survivor upgrades the claim's weight; a refutation moves to
+  `## Do not adopt as defaults (yet)`).
 - **Relationship to the shipping roadmap.** The repo's `ROADMAP.md`/`TASKS.md` is the
   *constrained, ship-it* track. This doc is the *unconstrained best-known* track. They run
   in parallel and must not blur.
