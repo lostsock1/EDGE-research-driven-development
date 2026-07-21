@@ -193,6 +193,11 @@ HAVE_GH=1
 meta_file() { printf '%s/%s.meta\n' "$RUNS_DIR" "$1"; }
 
 meta_set() { # meta_set <run-id> <key> <value>
+  # No-op unless the id is a real run id. A --fg run has none (it prints
+  # everything inline and posts no buttoned message, so nothing can ever key off
+  # it) — without this guard those call sites would write $RUNS_DIR/.meta and
+  # fg.meta, junk files no reader can resolve.
+  valid_run_id "${1:-}" || return 0
   local f; f="$(meta_file "$1")"
   local key="$2" val="$3" tmp
   tmp="$(mktemp "${f}.XXXXXX")" || return 1
@@ -408,7 +413,9 @@ if [ "$SUBCMD" = "list" ]; then
   echo "=== recent dispatches ==="
   # Newest first. A run with no .meta predates this bookkeeping — still listed,
   # just without the project/PR columns, so old ids never look like corruption.
-  ls -t "$RUNS_DIR"/*.log 2>/dev/null | head -15 | while read -r f; do
+  # Each run also writes a sibling <id>.stream.log; excluding those before the
+  # head cut is what keeps this from showing ~7 runs when 15 were asked for.
+  ls -t "$RUNS_DIR"/*.log 2>/dev/null | grep -v '\.stream\.log$' | head -15 | while read -r f; do
     rid="$(basename "$f" .log)"
     valid_run_id "$rid" || continue
     proj="$(meta_get "$rid" project)"; pr="$(meta_get "$rid" pr)"
@@ -825,7 +832,7 @@ print("".join(texts))
   if [ -z "$USED_MODEL" ]; then
     echo "[$(ts)] ALL MODELS FAILED id=${RUN_ID:-fg}" >> "$LOG"
     echo "edge-coder-run: all ${#MODELS[@]} model tiers failed (see $LOG)" >&2
-    meta_set "${RUN_ID:-fg}" outcome "all-tiers-failed"
+    meta_set "$RUN_ID" outcome "all-tiers-failed"
     if [ "$MODE" = bg ]; then
       send_tg "❌ Dispatch failed — none of the ${#MODELS[@]} model tiers would run it
 ${FAIL_SUMMARY% → } ✗
@@ -1022,6 +1029,15 @@ full output: $RUNS_DIR/${RUN_ID}.log"
   if [ "$HAVE_GH" = 1 ] && [ -n "$pr_num" ]; then
     (
       exec 9>&- 2>/dev/null || true
+      # The CI watcher runs in BOTH modes, but only an async run has an
+      # addressable id (--fg prints inline and writes no run log), so the
+      # run-scoped buttons below are emitted only when there is one. Passing an
+      # empty string to send_tg is skipped there, which is what keeps a --fg
+      # verdict from carrying "/dispatch fix " as a dead tap.
+      btn() { # btn <label> <verb> -> button spec, or nothing for a --fg run
+        [ -n "${RUN_ID:-}" ] || return 0
+        printf '%s\t/dispatch %s %s' "$1" "$2" "$RUN_ID"
+      }
       n=0
       while [ $n -lt $CI_POLL_MAX ]; do
         sleep $CI_POLL_SECS
@@ -1048,9 +1064,9 @@ $ci_detail
 👉 Recommended: send it back to the coder. It gets the failing check names and the original task, and pushes a fix to the same branch (no new PR).
 
 $pr_url" \
-              "🔁 Send it back to the coder"$'\t'"/dispatch fix $RUN_ID" \
+              "$(btn "🔁 Send it back to the coder" fix)" \
               "🔗 See the failing checks"$'\t'"url:$pr_url/checks" \
-              "📜 Show the full run log"$'\t'"/dispatch log $RUN_ID"
+              "$(btn "📜 Show the full run log" log)"
             echo "[$(ts)] CI verdict sent PR#$pr_num verdict=$ci_verdict detail='$ci_detail'" >> "$LOG"
             exit 0
             ;;
@@ -1063,7 +1079,7 @@ $ci_detail
 
 $pr_url" \
               "🔗 Open the checks tab"$'\t'"url:$pr_url/checks" \
-              "🔄 Re-read the CI verdict now"$'\t'"/dispatch ci $RUN_ID"
+              "$(btn "🔄 Re-read the CI verdict now" ci)"
             echo "[$(ts)] CI verdict sent PR#$pr_num verdict=$ci_verdict detail='$ci_detail'" >> "$LOG"
             exit 0
             ;;
@@ -1077,9 +1093,9 @@ reviewer verdict: $REVIEWER_VERDICT
 
 This verdict is parsed from model output and cannot prove reviewer execution.
 $pr_url" \
-                "🔁 Send it back to the coder"$'\t'"/dispatch retry $RUN_ID" \
+                "$(btn "🔁 Send it back to the coder" retry)" \
                 "🔗 Open PR #$pr_num on GitHub"$'\t'"url:$pr_url" \
-                "📄 What did it actually change?"$'\t'"/dispatch diff $RUN_ID"
+                "$(btn "📄 What did it actually change?" diff)"
             else
               # Trigger an immediate gate sweep so the merge button appears now,
               # without waiting for the next on-demand /gate sweep.
@@ -1097,7 +1113,7 @@ Reviewer evidence is model-reported, not independently provable by the wrapper.
 $pr_url" \
                 "🚦 Take me to the merge decision"$'\t'"/gate sweep" \
                 "🔗 Open PR #$pr_num on GitHub"$'\t'"url:$pr_url" \
-                "📄 What did it actually change?"$'\t'"/dispatch diff $RUN_ID"
+                "$(btn "📄 What did it actually change?" diff)"
             fi
             echo "[$(ts)] CI verdict sent PR#$pr_num verdict=$ci_verdict detail='$ci_detail'" >> "$LOG"
             exit 0
@@ -1110,7 +1126,7 @@ $pr_url" \
 👉 Recommended: check once more now — if CI has since finished, the verdict below tells you where it landed.
 
 $pr_url" \
-        "🔄 Check the CI verdict now"$'\t'"/dispatch ci $RUN_ID" \
+        "$(btn "🔄 Check the CI verdict now" ci)" \
         "🔗 Open PR #$pr_num on GitHub"$'\t'"url:$pr_url"
     ) </dev/null >>"$LOG" 2>&1 &
     disown 2>/dev/null || true

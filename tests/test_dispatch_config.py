@@ -266,11 +266,24 @@ class ChatButtonTests(unittest.TestCase):
         src = SCRIPT.read_text()
         self.assertIn(f"TG_CMD_MAX_BYTES={self.TG_CMD_MAX_BYTES}", src)
 
+    def button_commands(self, src):
+        """Every command the script can put on a button, in both spellings.
+
+        Buttons are written either as a literal `$'\\t'"/verb $RUN_ID"` spec or,
+        inside the CI watcher, via the `btn <label> <verb>` helper that omits the
+        button entirely for a --fg run. Both must be checked, or moving a command
+        between the two forms silently drops it out of this guard.
+        """
+        literal = re.findall(r'\$\'\\t\'"(/[a-z]+ [^"]*)"', src)
+        helper = [f"/dispatch {verb} $RUN_ID"
+                  for verb in re.findall(r'\$\(btn "[^"]*" ([a-z-]+)\)', src)]
+        return literal + helper
+
     def test_every_button_command_fits_the_cap(self):
-        # Expand each literal command the script can emit at its worst case and
-        # assert it still fits, so a future longer verb cannot ship invisible.
+        # Expand each command the script can emit at its worst case and assert it
+        # still fits, so a future longer verb cannot ship invisible.
         src = SCRIPT.read_text()
-        commands = re.findall(r'\$\'\\t\'"(/[a-z]+ [^"]*)"', src)
+        commands = self.button_commands(src)
         self.assertTrue(commands, "no button commands found — did the quoting change?")
         for cmd in commands:
             expanded = cmd.replace("$RUN_ID", self.LONGEST_RUN_ID)
@@ -278,6 +291,26 @@ class ChatButtonTests(unittest.TestCase):
             self.assertLessEqual(
                 len(expanded.encode()), self.TG_CMD_MAX_BYTES,
                 f"button command would be silently dropped by Telegram: {expanded!r}")
+
+    def test_both_button_spellings_are_covered(self):
+        # Guards the guard: if the CI watcher's helper is renamed or the literal
+        # quoting changes, the cap test above would silently check fewer commands
+        # instead of failing. Both forms are in use today.
+        src = SCRIPT.read_text()
+        self.assertTrue(re.search(r'\$\'\\t\'"/[a-z]+ ', src), "literal button form vanished")
+        self.assertTrue(re.search(r'\$\(btn "[^"]*" [a-z-]+\)', src), "btn helper form vanished")
+        self.assertGreaterEqual(len(self.button_commands(src)), 12)
+
+    def test_every_button_verb_is_a_real_subcommand(self):
+        # A button whose verb no subcommand handles is a dead tap. Cross-check
+        # every /dispatch verb on a button against the SUBCMD case list.
+        src = SCRIPT.read_text()
+        declared = set(re.search(r'case "\$\{1:-\}" in\n\s*([a-z|-]+)\)', src).group(1).split("|"))
+        for cmd in self.button_commands(src):
+            if cmd.startswith("/dispatch "):
+                verb = cmd.split()[1]
+                self.assertIn(verb, declared,
+                              f"button fires /dispatch {verb}, which SUBCMD does not declare")
 
     def make_run(self, td, **meta):
         root = Path(td)
@@ -352,6 +385,37 @@ class ChatButtonTests(unittest.TestCase):
             Path(td, "proj.env").write_text("")
             r = self.run_verb(env, "retry", rid)
             self.assertIn("re-dispatching (retry)", r.stdout)
+
+    def test_foreground_run_writes_no_metadata(self):
+        # A --fg run has no run id, so every meta_set call site passes an empty
+        # string. Unguarded that writes $RUNS_DIR/.meta (and fg.meta) — junk no
+        # reader can ever resolve, since only a valid run id is addressable.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "home"; home.mkdir()
+            repo = root / "repo"; subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            fake = root / "opencode"
+            fake.write_text('''#!/usr/bin/env bash
+if [[ "$*" == *"say hello"* ]]; then printf '%s\\n' '{"type":"text","text":"hello"}'; exit 0; fi
+printf '%s\\n' '{"type":"text","text":"=== LOOP STATUS ===\\nREVIEWER: Pass — fake\\n=== END ==="}'
+exit 0
+''')
+            fake.chmod(0o755)
+            runs = root / "runs"
+            shared = root / "config.env"
+            shared.write_text(
+                f'RDD_OPENCODE={fake}\nRDD_MODELS="fake/model"\n'
+                'RDD_TIMEOUTS_BG="5"\nRDD_TIMEOUTS_FG="5"\n'
+                f'RDD_LOG={root}/run.log\nRDD_RUNS_DIR={runs}\nRDD_LOCKDIR={root}/locks\n'
+            )
+            project = root / "project.env"; project.write_text(f'RDD_REPO_DIR={repo}\n')
+            env = os.environ.copy()
+            env.update({"HOME": str(home), "RDD_SHARED_CONFIG": str(shared),
+                        "EDGE_RDD_CONFIG": str(project)})
+            subprocess.run([str(SCRIPT), "--fg", "test task"], env=env,
+                           text=True, capture_output=True)
+            stray = sorted(p.name for p in runs.iterdir() if p.name.endswith(".meta"))
+            self.assertEqual(stray, [], f"foreground run wrote metadata: {stray}")
 
     def test_metadata_is_never_sourced_as_shell(self):
         # A .meta value is untrusted-ish input written by the wrapper; reading it
