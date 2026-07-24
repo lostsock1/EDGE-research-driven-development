@@ -165,6 +165,14 @@ NUDGE_TARGET=${EDGE_CODER_TARGET:-${RDD_TG_TARGET:-}}
 NUDGE_THREAD=${EDGE_CODER_THREAD:-${RDD_TG_THREAD:-}}
 CI_POLL_SECS=${RDD_CI_POLL_SECS:-60}
 CI_POLL_MAX=${RDD_CI_POLL_MAX:-40}
+# Initial fast-poll phase: a quick required check (a lint / template-validation
+# style job that finishes in seconds) should not wait a full CI_POLL_SECS for its
+# verdict. These polls run BEFORE the steady phase and are ADDED to it, so the
+# slow-CI watch budget is unchanged — only first-verdict latency drops (from up to
+# CI_POLL_SECS down to CI_FAST_SECS). Seconds / count; CI_FAST_POLLS=0 restores
+# pure fixed-interval polling.
+CI_FAST_SECS=${RDD_CI_FAST_SECS:-10}
+CI_FAST_POLLS=${RDD_CI_FAST_POLLS:-6}
 GATE_SCRIPT=${RDD_GATE_SCRIPT:-$HOME/.openclaw/shared-scripts/edge-pr-gate.sh}
 # gh/setsid/flock often live outside a systemd-spawned PATH — prepend what you need.
 [ -n "${RDD_PATH_PREPEND:-}" ] && export PATH="$RDD_PATH_PREPEND:$PATH"
@@ -1039,8 +1047,12 @@ full output: $RUNS_DIR/${RUN_ID}.log"
         printf '%s\t/dispatch %s %s' "$1" "$2" "$RUN_ID"
       }
       n=0
-      while [ $n -lt $CI_POLL_MAX ]; do
-        sleep $CI_POLL_SECS
+      # Fast polls first (CI_FAST_POLLS × CI_FAST_SECS), then the steady interval.
+      # The fast phase is additive, so a slow build keeps the full
+      # CI_POLL_MAX × CI_POLL_SECS budget while a fast check reports far sooner.
+      total_polls=$((CI_FAST_POLLS + CI_POLL_MAX))
+      while [ $n -lt $total_polls ]; do
+        if [ $n -lt "$CI_FAST_POLLS" ]; then sleep "$CI_FAST_SECS"; else sleep "$CI_POLL_SECS"; fi
         n=$((n+1))
         # `gh pr checks` can exit nonzero while still emitting valid JSON for
         # failed checks; never discard parseable stdout because of its rc.
@@ -1124,7 +1136,7 @@ $pr_url" \
             ;;
         esac
       done
-      send_tg "⏳ PR #$pr_num — CI still had no verdict after $((CI_POLL_SECS*CI_POLL_MAX/60)) min
+      send_tg "⏳ PR #$pr_num — CI still had no verdict after $(( (CI_FAST_SECS*CI_FAST_POLLS + CI_POLL_SECS*CI_POLL_MAX) / 60 )) min
 
 👉 What this means: I stopped watching, not because something failed, but because the checks were still pending (or none reported) for longer than I wait. The PR is untouched.
 👉 Recommended: check once more now — if CI has since finished, the verdict below tells you where it landed.

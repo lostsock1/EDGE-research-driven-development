@@ -28,6 +28,8 @@ elif args[:2] == ["pr", "checks"]:
     if mode == "no-ci": print("[]")
     elif mode == "missing": print(json.dumps([{"name":"tests","bucket":"pass"}]))
     elif mode == "failing": print(json.dumps([{"name":"tests","bucket":"fail"},{"name":"lint","bucket":"pass"}]))
+    elif mode == "skipping": print(json.dumps([{"name":"tests","bucket":"pass"},{"name":"lint","bucket":"skipping"}]))
+    elif mode == "cancel": print(json.dumps([{"name":"tests","bucket":"pass"},{"name":"lint","bucket":"cancel"}]))
     else: print(json.dumps([{"name":"tests","bucket":"pass"},{"name":"lint","bucket":"pass"}]))
 elif args[:2] == ["api", "user"]:
     print(json.dumps({"login":"trusted-bot"}))
@@ -76,6 +78,25 @@ class PrGateTests(unittest.TestCase):
     def test_no_ci_is_never_chat_merge_actionable(self):
         result = self.run_gate("no-ci")
         self.assertIn("CI no-ci", result.stdout)
+        self.assertNotIn("pending eg:", result.stdout)
+
+    def test_skipped_check_counts_as_satisfied_and_is_actionable(self):
+        # Regression: a path-filtered / conditional required job reports bucket
+        # "skipping" — terminal and non-failing. The gate must read the PR green
+        # and mint its merge action, matching edge-coder-run.sh's CI watcher. The
+        # old classifier saw "skipping" as pending and never offered the merge, so
+        # a green PR the watcher had already announced sat un-mergeable in the gate.
+        result = self.run_gate("skipping")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pending eg:", result.stdout)
+        self.assertIn("review=pass", result.stdout)
+
+    def test_cancelled_check_is_red_and_not_actionable(self):
+        # "cancel" is terminal and did not succeed; it must read red (never
+        # pending), so the PR is not offered for merge and rides the coder loop.
+        result = self.run_gate("cancel")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("CI RED", result.stdout)
         self.assertNotIn("pending eg:", result.stdout)
 
     def test_green_required_checks_and_review_marker_are_actionable(self):

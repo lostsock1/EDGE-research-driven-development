@@ -247,6 +247,47 @@ exit 0
         self.assertNotIn("PARTIAL-WORK handoff", log)
 
 
+class CiWatcherPollingTests(unittest.TestCase):
+    """The detached CI watcher polls fast at first, then at the steady interval.
+
+    The watcher runs in a detached background subshell reached only on a real
+    dispatch's success path, so — like the button-cap guard — its shape is pinned
+    at the source level. The invariants that matter: a short initial interval
+    exists (so a quick check reports in ~CI_FAST_SECS, not a full CI_POLL_SECS),
+    and the fast phase is ADDED to (never subtracted from) the steady
+    CI_POLL_MAX × CI_POLL_SECS budget, so slow CI keeps its full watch window.
+    """
+
+    src = SCRIPT.read_text()
+
+    def _default(self, name):
+        m = re.search(rf'{name}=\$\{{RDD_{name}:-(\d+)\}}', self.src)
+        self.assertIsNotNone(m, f"{name} default missing or not env-overridable")
+        return int(m.group(1))
+
+    def test_fast_poll_knobs_are_overridable_with_defaults(self):
+        self.assertRegex(self.src, r'CI_FAST_SECS=\$\{RDD_CI_FAST_SECS:-\d+\}')
+        self.assertRegex(self.src, r'CI_FAST_POLLS=\$\{RDD_CI_FAST_POLLS:-\d+\}')
+
+    def test_first_verdict_latency_is_below_the_steady_interval(self):
+        self.assertLess(self._default("CI_FAST_SECS"), self._default("CI_POLL_SECS"))
+        self.assertGreater(self._default("CI_FAST_POLLS"), 0)
+
+    def test_fast_phase_is_additive_not_a_budget_cut(self):
+        # total_polls = CI_FAST_POLLS + CI_POLL_MAX — the fast polls are extra and
+        # up front, so a slow build still gets the full steady CI_POLL_MAX budget.
+        self.assertIn("total_polls=$((CI_FAST_POLLS + CI_POLL_MAX))", self.src)
+        self.assertRegex(self.src, r'while \[ \$n -lt \$total_polls \]')
+        self.assertIn(
+            'if [ $n -lt "$CI_FAST_POLLS" ]; then sleep "$CI_FAST_SECS"; '
+            'else sleep "$CI_POLL_SECS"; fi', self.src)
+
+    def test_timeout_message_counts_the_fast_phase(self):
+        # The "no verdict after N min" line must include the fast-phase seconds so
+        # it does not under-report the actual watch window.
+        self.assertIn("CI_FAST_SECS*CI_FAST_POLLS + CI_POLL_SECS*CI_POLL_MAX", self.src)
+
+
 class ChatButtonTests(unittest.TestCase):
     """The chat-button surface: run metadata, follow-up verbs, and the byte cap.
 
