@@ -97,7 +97,7 @@ set -uo pipefail
 # verb here can never leave a guard behind that rejects it.
 SUBCMD=""
 case "${1:-}" in
-  status|ci-verdict|list|log|diff|ci|health|retry|fix) SUBCMD="$1" ;;
+  status|ci-verdict|list|log|diff|ci|health|retry|fix|stage|go) SUBCMD="$1" ;;
 esac
 
 # ---- configuration --------------------------------------------------------
@@ -227,6 +227,10 @@ meta_task() { # meta_task <run-id> -> the original task text
 }
 
 valid_run_id() { [[ "$1" =~ ^run-[0-9]{8}-[0-9]{6}-[0-9]+$ ]]; }
+# A staged work-order id. Same shape as a run id so its longest form
+# ("WO-YYYYMMDD-HHMMSS-32767", 24 bytes) keeps "/dispatch go <id>" (37 bytes)
+# well under Telegram's 58-byte command-button budget.
+valid_wo_id() { [[ "$1" =~ ^WO-[0-9]{8}-[0-9]{6}-[0-9]+$ ]]; }
 
 # ---- chat delivery ----------------------------------------------------------
 # Telegram callback_data is capped at 64 bytes; a command button is encoded as
@@ -499,6 +503,63 @@ if [ "$SUBCMD" = "health" ]; then
   done
   echo "(a ❌ here means the tier is skipped, not that a dispatch fails — the ladder falls through to the next one.)"
   exit 0
+fi
+
+# ---- work-order staging (the one-tap dispatch surface) -----------------------
+# `propose` stages the promoted implementation task with `stage`, gets a WO id,
+# and posts it with a "🚀 Dispatch this work order" button (/dispatch go <WO>).
+# The operator taps once instead of retyping "go"; the review gate is unchanged
+# — they still read the work order before tapping. The task text (which can be
+# long and contain anything) never rides the button: only the short id does, and
+# `go` recovers the task + this call's project config from the staged file — the
+# same recover-by-id trick the run .meta files use. The staged file is read by
+# strict key lookup, never sourced.
+STAGE_DIR=${RDD_STAGE_DIR:-$HOME/.local/state/edge-rdd/staged}
+if [ "$SUBCMD" = "stage" ]; then
+  WO_TASK="${2:-}"
+  if [ -z "$WO_TASK" ]; then
+    echo "usage: edge-coder-run.sh stage '<promoted implementation task>'" >&2
+    exit 2
+  fi
+  if [ "$CONFIG" = "$SHARED_CONFIG" ]; then
+    echo "edge-coder-run: stage needs a project — set EDGE_RDD_CONFIG=/path/to/project.env (a work order belongs to one repo)" >&2
+    exit 2
+  fi
+  mkdir -p "$STAGE_DIR"
+  WO_ID="WO-$(date +%Y%m%d-%H%M%S)-$RANDOM"
+  WO_FILE="$STAGE_DIR/$WO_ID.wo"
+  {
+    printf 'config=%s\n' "$CONFIG"
+    printf 'staged=%s\n' "$(ts)"
+    printf 'task_b64=%s\n' "$(printf '%s' "$WO_TASK" | base64 -w0)"
+  } > "$WO_FILE"
+  echo "STAGED $WO_ID"
+  echo "Dispatch it: edge-coder-run.sh go $WO_ID   (or tap the 🚀 /dispatch go $WO_ID button)"
+  exit 0
+fi
+if [ "$SUBCMD" = "go" ]; then
+  WO_ID="${2:-}"
+  if [ -z "$WO_ID" ] || ! valid_wo_id "$WO_ID"; then
+    echo "usage: edge-coder-run.sh go <WO-id>   (from the 🚀 Dispatch button on a proposed work order)" >&2
+    exit 2
+  fi
+  WO_FILE="$STAGE_DIR/$WO_ID.wo"
+  if [ ! -f "$WO_FILE" ]; then
+    echo "unknown or already-dispatched work order: $WO_ID (staged work orders are single-use)" >&2
+    exit 4
+  fi
+  # Strict key lookup — never source the staged file.
+  WO_CFG="$(grep -m1 '^config=' "$WO_FILE" | cut -d= -f2-)"
+  WO_TASK="$(grep -m1 '^task_b64=' "$WO_FILE" | cut -d= -f2- | base64 -d 2>/dev/null)"
+  if [ -z "$WO_CFG" ] || [ ! -f "$WO_CFG" ] || [ -z "$WO_TASK" ]; then
+    echo "work order $WO_ID is missing its task or project config — dispatch it manually" >&2
+    exit 4
+  fi
+  # Single-use: consume BEFORE dispatching so a double-tap can't double-dispatch.
+  # Kept as .consumed (not deleted) for audit; a second `go` then finds no .wo.
+  mv -f "$WO_FILE" "$WO_FILE.consumed" 2>/dev/null || true
+  echo "dispatching work order $WO_ID"
+  EDGE_RDD_CONFIG="$WO_CFG" exec "$0" "$WO_TASK"
 fi
 
 if [ "$SUBCMD" = "retry" ] || [ "$SUBCMD" = "fix" ]; then

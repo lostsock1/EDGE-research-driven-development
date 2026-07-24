@@ -485,5 +485,100 @@ class GreenMergeOfferTests(unittest.TestCase):
         self.assertNotIn('"$GATE_SCRIPT" sweep', self.src)
 
 
+class StageGoTests(unittest.TestCase):
+    """`stage`/`go` — the one-tap dispatch surface. `propose` stages the promoted
+    task under a short WO id; the 🚀 button carries only that id; `go` recovers the
+    task + its project and dispatches. The task never rides the button, the staged
+    file is never sourced, and a staged work order is single-use."""
+
+    LONGEST_WO_ID = "WO-20260725-235959-32767"
+
+    def _env(self, td):
+        root = Path(td)
+        home = root / "home"; home.mkdir(exist_ok=True)
+        shared = root / "shared.env"; shared.write_text("")
+        # Empty project config: `go` re-execs into a real dispatch, which then
+        # stops at the MODELS guard — after the task has been recovered and the
+        # "dispatching" line printed, which is what these tests observe.
+        proj = root / "proj.env"; proj.write_text("")
+        env = os.environ.copy()
+        env.pop("RDD_DEFAULT_PROJECT_CONFIG", None)
+        env.update({"HOME": str(home), "RDD_SHARED_CONFIG": str(shared),
+                    "EDGE_RDD_CONFIG": str(proj), "RDD_STAGE_DIR": str(root / "staged"),
+                    "RDD_LOG": str(root / "log"), "RDD_RUNS_DIR": str(root / "runs"),
+                    "RDD_LOCKDIR": str(root / "locks")})
+        return env
+
+    def test_go_button_command_fits_the_telegram_cap(self):
+        cmd = f"/dispatch go {self.LONGEST_WO_ID}"
+        self.assertLessEqual(len(cmd.encode()), 58, cmd)
+
+    def test_stage_and_go_are_declared_subcommands(self):
+        # A tapped "/dispatch go <id>" and the agent's `stage` call must route
+        # through the subcommand seam, not be treated as a free-form task.
+        src = SCRIPT.read_text()
+        declared = set(re.search(r'case "\$\{1:-\}" in\n\s*([a-z|-]+)\)', src).group(1).split("|"))
+        self.assertIn("stage", declared)
+        self.assertIn("go", declared)
+
+    def test_stage_then_go_round_trips_task_and_dispatches(self):
+        task = 'implement "the" widget\nwith $VARS && `ticks`'
+        with tempfile.TemporaryDirectory() as td:
+            env = self._env(td)
+            s = subprocess.run([str(SCRIPT), "stage", task], env=env,
+                               text=True, capture_output=True)
+            self.assertEqual(s.returncode, 0, s.stderr)
+            m = re.search(r"STAGED (WO-\d{8}-\d{6}-\d+)", s.stdout)
+            self.assertTrue(m, s.stdout)
+            wo = m.group(1)
+            g = subprocess.run([str(SCRIPT), "go", wo], env=env,
+                               text=True, capture_output=True)
+            self.assertIn("dispatching work order", g.stdout)
+            # single-use: the second tap finds nothing to dispatch
+            g2 = subprocess.run([str(SCRIPT), "go", wo], env=env,
+                                text=True, capture_output=True)
+            self.assertEqual(g2.returncode, 4, g2.stdout + g2.stderr)
+            self.assertIn("already-dispatched", g2.stderr)
+
+    def test_stage_requires_a_project_config(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); home = root / "home"; home.mkdir()
+            shared = root / "shared.env"; shared.write_text("")
+            env = os.environ.copy()
+            env.pop("EDGE_RDD_CONFIG", None)
+            env.pop("RDD_DEFAULT_PROJECT_CONFIG", None)
+            env.update({"HOME": str(home), "RDD_SHARED_CONFIG": str(shared),
+                        "RDD_STAGE_DIR": str(root / "staged")})
+            r = subprocess.run([str(SCRIPT), "stage", "do a thing"], env=env,
+                               text=True, capture_output=True)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("stage needs a project", r.stderr)
+
+    def test_go_rejects_a_malformed_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = subprocess.run([str(SCRIPT), "go", "; rm -rf /"], env=self._env(td),
+                               text=True, capture_output=True)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("usage:", r.stderr)
+
+    def test_go_rejects_unknown_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = subprocess.run([str(SCRIPT), "go", "WO-19990101-000000-1"],
+                               env=self._env(td), text=True, capture_output=True)
+            self.assertEqual(r.returncode, 4)
+            self.assertIn("unknown or already-dispatched", r.stderr)
+
+    def test_staged_task_is_never_sourced(self):
+        with tempfile.TemporaryDirectory() as td:
+            env = self._env(td)
+            canary = Path(td) / "pwned"
+            s = subprocess.run([str(SCRIPT), "stage", f"$(touch {canary})"],
+                               env=env, text=True, capture_output=True)
+            wo = re.search(r"STAGED (WO-\S+)", s.stdout).group(1)
+            subprocess.run([str(SCRIPT), "go", wo], env=env,
+                           text=True, capture_output=True)
+            self.assertFalse(canary.exists(), "staged task was evaluated as shell")
+
+
 if __name__ == "__main__":
     unittest.main()
