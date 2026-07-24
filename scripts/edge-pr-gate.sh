@@ -308,14 +308,26 @@ def pr_checks_verdict(slug, number, required):
     if not checks:
         return "no-ci", "no checks reported"
     by_name = {c.get("name"): c.get("bucket") for c in checks}
+    # Bucket semantics are the single source of truth in edge-coder-run.sh's
+    # strict_ci_verdict: gh maps pass=SUCCESS, skipping=SKIPPED/NEUTRAL,
+    # fail=ERROR/FAILURE/TIMED_OUT/ACTION_REQUIRED, cancel=CANCELLED, pending=rest.
+    # skipping and cancel are TERMINAL — they never become pass. Treating every
+    # non-pass bucket as "pending" (the old behaviour here) wedged a green PR
+    # whose path-filtered / conditional job SKIPPED at "pending" forever, so this
+    # gate never minted the merge action even though the dispatch CI watcher had
+    # already reported the same PR green — the "take me to the merge decision"
+    # button then dead-ended. A skipped/neutral check is done and not failing
+    # (satisfied); a cancelled check did not succeed (red).
     if any(c.get("bucket") == "fail" for c in checks):
         return "red", "failing checks present"
+    if any(c.get("bucket") == "cancel" for c in checks):
+        return "red", "cancelled checks present"
     missing = [name for name in required if name not in by_name]
     if missing:
         return "missing-required", "missing required: " + ", ".join(missing)
-    if any(c.get("bucket") != "pass" for c in checks):
+    if any(c.get("bucket") not in ("pass", "skipping") for c in checks):
         return "pending", "checks not all passed"
-    return "green", "all checks passed; required contexts present"
+    return "green", "all checks passed or skipped; required contexts present"
 
 
 _GH_LOGIN = None
