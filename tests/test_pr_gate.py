@@ -22,9 +22,12 @@ elif args[:2] == ["pr", "list"]:
             print("[]")
         else:
             print(json.dumps([{"number": 1, "title": "feat: change", "headRefName": "cm/change", "headRefOid": "abc123", "baseRefName": os.environ.get("FAKE_BASE", "main"), "baseRefOid": "base123", "mergeable": os.environ.get("FAKE_MERGEABLE", "MERGEABLE"), "mergeStateStatus": os.environ.get("FAKE_MERGE_STATE", "CLEAN"), "isDraft": False, "url": "https://example/pr/1"}]))
+elif args[:2] == ["pr", "view"]:
+    print(json.dumps({"number": 1, "title": "feat: change", "headRefName": "cm/change", "headRefOid": "abc123", "baseRefName": os.environ.get("FAKE_BASE", "main"), "baseRefOid": "base123", "mergeable": os.environ.get("FAKE_MERGEABLE", "MERGEABLE"), "mergeStateStatus": os.environ.get("FAKE_MERGE_STATE", "CLEAN"), "isDraft": os.environ.get("FAKE_DRAFT") == "1", "url": "https://example/pr/1"}))
 elif args[:2] == ["pr", "checks"]:
     if mode == "no-ci": print("[]")
     elif mode == "missing": print(json.dumps([{"name":"tests","bucket":"pass"}]))
+    elif mode == "failing": print(json.dumps([{"name":"tests","bucket":"fail"},{"name":"lint","bucket":"pass"}]))
     elif mode == "skipping": print(json.dumps([{"name":"tests","bucket":"pass"},{"name":"lint","bucket":"skipping"}]))
     elif mode == "cancel": print(json.dumps([{"name":"tests","bucket":"pass"},{"name":"lint","bucket":"cancel"}]))
     else: print(json.dumps([{"name":"tests","bucket":"pass"},{"name":"lint","bucket":"pass"}]))
@@ -186,6 +189,112 @@ class PrGateTests(unittest.TestCase):
             self.assertIn("changed after approval", result.stdout)
             saved = json.loads((state_dir / "state.json").read_text())
             self.assertEqual(saved["actions"]["deadbeef"]["status"], "failed")
+
+
+class OfferTests(unittest.TestCase):
+    """`offer <repo-dir> <pr>` posts ONE just-green PR's merge ask to the hub,
+    re-verifying the same gates a full sweep would and reusing its message path
+    (process_project) so a bare button and the briefed ask cannot drift apart."""
+
+    def _fixture(self, td):
+        root = Path(td)
+        bindir = root / "bin"; bindir.mkdir()
+        gh = bindir / "gh"; gh.write_text(FAKE_GH); gh.chmod(0o755)
+        repo = root / "repo"; (repo / ".git").mkdir(parents=True)
+        cfg = root / "cfg"; cfg.mkdir()
+        (cfg / "config.env").write_text('RDD_REQUIRED_CHECKS="tests,lint"\n')
+        (cfg / "demo.env").write_text(f"RDD_REPO_DIR={repo}\nRDD_MAIN_BRANCH=main\n")
+        env = os.environ.copy()
+        env.update({"PATH": f"{bindir}:{env['PATH']}", "RDD_GATE_CONFIG_DIR": str(cfg),
+                    "RDD_GATE_STATE_DIR": str(root / "state")})
+        return repo, cfg, env
+
+    def run_offer(self, mode="green", merge_state="CLEAN", **extra):
+        with tempfile.TemporaryDirectory() as td:
+            repo, _cfg, env = self._fixture(td)
+            # A hub target is set ONLY here (dry-run): with a target, send_message's
+            # dry branch prints the DRY-RUN payload (buttons/awareness text) we
+            # assert on. The non-dry tests below set NO target, so send is a no-op
+            # and never execs the real openclaw CLI.
+            env.update({"FAKE_CHECK_MODE": mode, "FAKE_MERGE_STATE": merge_state,
+                        "RDD_GATE_TG_TARGET": "-100999", **extra})
+            return subprocess.run([str(SCRIPT), "offer", str(repo), "1", "--dry-run"],
+                                  env=env, text=True, capture_output=True)
+
+    def test_green_reviewed_pr_is_offered_with_a_merge_button(self):
+        r = self.run_offer(mode="green")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("OFFERED eg:", r.stdout)
+        self.assertIn("/gate act eg:", r.stdout)  # dry-run prints the merge button command
+
+    def test_red_pr_is_not_offered(self):
+        r = self.run_offer(mode="failing")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("NOT-OFFERED", r.stdout)
+        self.assertNotIn("/gate act eg:", r.stdout)
+
+    def test_review_blocked_pr_is_not_offered(self):
+        r = self.run_offer(mode="green", FAKE_REVIEW="fail")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("NOT-OFFERED", r.stdout)
+        self.assertIn("reviewer gate blocked", r.stdout)
+        self.assertNotIn("/gate act eg:", r.stdout)
+
+    def test_green_but_unmergeable_pr_pings_hub_without_a_button(self):
+        r = self.run_offer(mode="green", merge_state="BEHIND")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("NOT-OFFERED", r.stdout)
+        self.assertIn("not yet mergeable", r.stdout)  # awareness note (dry printed)
+        self.assertNotIn("/gate act eg:", r.stdout)
+
+    def test_unknown_repo_dir_is_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            _repo, _cfg, env = self._fixture(td)
+            r = subprocess.run([str(SCRIPT), "offer", str(Path(td) / "nope"), "1",
+                                "--dry-run"], env=env, text=True, capture_output=True)
+            self.assertEqual(r.returncode, 4)
+            self.assertIn("NOT-OFFERED", r.stdout)
+
+    def test_offer_is_idempotent_for_the_same_head(self):
+        # Two offers for the same green PR head reuse ONE pending merge action, so a
+        # watcher that fires twice cannot pile up duplicate asks. Non-dry to persist
+        # state (no chat target -> send is a no-op, action still minted and saved).
+        with tempfile.TemporaryDirectory() as td:
+            repo, _cfg, env = self._fixture(td)
+            env.update({"FAKE_CHECK_MODE": "green"})
+            r1 = subprocess.run([str(SCRIPT), "offer", str(repo), "1"], env=env,
+                                text=True, capture_output=True)
+            r2 = subprocess.run([str(SCRIPT), "offer", str(repo), "1"], env=env,
+                                text=True, capture_output=True)
+            self.assertEqual(r1.returncode, 0, r1.stderr)
+            self.assertEqual(r2.returncode, 0, r2.stderr)
+            import re as _re
+            m1 = _re.search(r"OFFERED eg:([0-9a-f]{12})", r1.stdout)
+            m2 = _re.search(r"OFFERED eg:([0-9a-f]{12})", r2.stdout)
+            self.assertTrue(m1 and m2, f"{r1.stdout!r} :: {r2.stdout!r}")
+            self.assertEqual(m1.group(1), m2.group(1), "duplicate merge asks minted")
+
+    def test_offer_does_not_supersede_other_pending_actions(self):
+        # full_scan=False: offering PR #1 must not judge/cancel the project's other
+        # pending items (a prune here). A full sweep would supersede a key not in
+        # its desired set; offer sees only its one PR, so it must leave the rest.
+        with tempfile.TemporaryDirectory() as td:
+            repo, cfg, env = self._fixture(td)
+            state_dir = Path(td) / "state"; state_dir.mkdir()
+            other = {"key": "prune:old-branch:deadbeef", "label": "repo",
+                     "project_key": "owner/repo", "cfg": str(cfg / "demo.env"),
+                     "repo": "owner/repo", "trunk": "main", "kind": "prune",
+                     "branch": "old-branch", "reason": "no unique commits",
+                     "ref_sha": "deadbeef", "status": "pending", "created": 1}
+            (state_dir / "state.json").write_text(
+                json.dumps({"actions": {"keepme": other}, "posts": {}}))
+            env.update({"FAKE_CHECK_MODE": "green"})
+            r = subprocess.run([str(SCRIPT), "offer", str(repo), "1"], env=env,
+                               text=True, capture_output=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            saved = json.loads((state_dir / "state.json").read_text())
+            self.assertEqual(saved["actions"]["keepme"]["status"], "pending",
+                             "offer wrongly superseded an unrelated pending action")
 
 
 if __name__ == "__main__":

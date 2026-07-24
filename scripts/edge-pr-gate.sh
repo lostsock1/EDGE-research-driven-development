@@ -33,6 +33,15 @@
 #                       buttons (dry-run prints payloads instead of sending).
 #                       Prints a per-project summary; last line is ALL_CLEAN
 #                       when nothing needs attention anywhere.
+#   offer <repo-dir> <pr> [--dry-run]
+#                       mint + post JUST that one PR's merge ask to the hub,
+#                       re-verifying every gate first. The dispatch CI watcher
+#                       (edge-coder-run.sh) calls this the moment a PR's checks go
+#                       green, so the merge button (with its full brief) appears
+#                       at once instead of firing a whole-repo sweep the operator
+#                       must then trigger and hunt through. Same gating/message as
+#                       sweep (shared process_project); a green-but-unmergeable PR
+#                       posts an awareness note, not a dead button.
 #   act <id>            execute one pending action after operator approval
 #   pending [label]     list pending actions (optionally one project)
 #   status              state summary: pending actions + recent results
@@ -63,7 +72,7 @@
 #     current pending list
 #   - every gh call has a hard timeout; state writes are flock-serialized
 #
-# Usage: edge-pr-gate.sh sweep [--dry-run] | act <id> | pending [label] | status
+# Usage: edge-pr-gate.sh sweep [--dry-run] | offer <repo-dir> <pr> [--dry-run] | act <id> | pending [label] | status
 
 set -uo pipefail
 
@@ -553,6 +562,187 @@ def desired_actions(proj, facts):
     return out
 
 
+def process_project(state, proj, facts, dest, now, dry=False, full_scan=True,
+                    force=False):
+    """Reconcile ONE project's desired gate actions into state and, when there
+    are any, post a single approval message (per-action brief + buttons) to the
+    hub. Prints the per-project summary. Returns True iff the project is fully
+    clean (no actions and no blocked PRs).
+
+    Shared by sweep (per project, full_scan=True, throttled) and offer (a single
+    just-green PR, full_scan=False so it never supersedes other projects'/PRs'
+    pending actions, force=True so a fresh CI-green event always posts). Both
+    mint and render merge asks through this one path, so a bare button and the
+    briefed ask can never drift apart.
+    """
+    label = proj["label"]
+    project_key = facts["slug"].strip().lower()
+
+    # info lines
+    red = [p for p in facts["prs"] if p["verdict"] == "red"]
+    pend = [p for p in facts["prs"] if p["verdict"] in ("pending", "missing-required", "no-ci", "unavailable")]
+    wrong_base = [p for p in facts["prs"] if p["baseRefName"] != proj["trunk"]]
+    merge_blocked = [p for p in facts["prs"] if p["baseRefName"] == proj["trunk"] and (p.get("mergeable") != "MERGEABLE" or p.get("mergeStateStatus") != "CLEAN")]
+    review_blocked = [p for p in facts["prs"] if p["baseRefName"] == proj["trunk"] and p.get("mergeable") == "MERGEABLE" and p.get("mergeStateStatus") == "CLEAN" and p["verdict"] == "green" and not p["review_ready"]]
+    drafts = [p for p in facts["prs"] if p["isDraft"]]
+    print(f"  repo {facts['slug']}: {len(facts['branches'])} branch(es), "
+          f"{len(facts['prs'])} open PR(s)")
+    for p in red:
+        print(f"  ❌ PR #{p['number']} CI RED — {p['title'][:60]} {p['url']}")
+    for p in pend:
+        print(f"  ⏳ PR #{p['number']} CI {p['verdict']} ({p['verdict_detail']}) — {p['title'][:60]}")
+    for p in wrong_base:
+        print(f"  ⛔ PR #{p['number']} targets {p['baseRefName']}, not protected trunk {proj['trunk']} — {p['title'][:60]}")
+    for p in merge_blocked:
+        print(f"  ⛔ PR #{p['number']} merge state {p.get('mergeStateStatus')} / {p.get('mergeable')} — refresh/update branch first")
+    for p in review_blocked:
+        print(f"  ⛔ PR #{p['number']} reviewer gate blocked ({p['review_detail']}) — {p['title'][:60]}")
+    for p in drafts:
+        print(f"  \U0001f4dd PR #{p['number']} draft — {p['title'][:60]}")
+
+    desired = desired_actions(proj, facts)
+
+    # reconcile pending actions for this project
+    existing = {a["key"]: (aid, a) for aid, a in state["actions"].items()
+                if a.get("project_key", a.get("repo", "").lower()) == project_key and a["status"] == "pending"}
+    if full_scan:
+        # A full sweep has seen every PR and branch, so an existing pending action
+        # whose key is no longer desired reflects repo state that changed before
+        # approval — supersede it. offer sees ONLY its one PR (full_scan=False), so
+        # it must not judge the rest of the project or it would wrongly cancel
+        # other still-valid pending asks.
+        for key, (aid, a) in existing.items():
+            if key not in desired:
+                a["status"] = "superseded"
+                a["result"] = "repo state changed before approval"
+    actions = []  # (id, action)
+    for key, tpl in desired.items():
+        if key in existing and existing[key][1]["status"] == "pending":
+            actions.append((existing[key][0], existing[key][1]))
+            continue
+        aid = secrets.token_hex(6)
+        a = {"key": key, "label": label, "project_key": project_key, "cfg": proj["cfg"],
+             "repo": facts["slug"], "trunk": proj["trunk"],
+             "status": "pending", "created": now, **tpl}
+        state["actions"][aid] = a
+        actions.append((aid, a))
+
+    if not actions:
+        if red or pend or wrong_base or merge_blocked or review_blocked:
+            print("  no approvals needed (CI/reviewer-blocked PRs ride the coder loop)")
+            state["posts"].setdefault(project_key, {})["fingerprint"] = ""
+            return False
+        print("  clean ✓ (trunk-only or only active PR work)")
+        state["posts"].setdefault(project_key, {})["fingerprint"] = ""
+        return True
+
+    fp = hashlib.sha1(json.dumps(sorted(desired.keys())).encode()).hexdigest()
+    post = state["posts"].get(project_key, {})
+    fresh = post.get("fingerprint") != fp
+    aged = now - post.get("ts", 0) >= REASK_HOURS * 3600
+    snoozed = now < post.get("snoozed_until", 0)
+    for aid, a in actions:
+        print(f"  pending eg:{aid}  {a['desc']}")
+    # offer passes force=True: a fresh CI-green event always posts its ask, past
+    # the snooze / re-ask throttle a periodic sweep honours.
+    if not force:
+        if snoozed and not fresh:
+            print(f"  (snoozed until {time.strftime('%H:%M', time.localtime(post['snoozed_until']))} — not re-posting)")
+            return False
+        if not (fresh or aged):
+            h = (now - post.get("ts", now)) / 3600
+            print(f"  (asked {h:.1f}h ago, unchanged — not re-posting; re-ask after {REASK_HOURS:.0f}h)")
+            return False
+
+    shown = actions[:MAX_BUTTONS]
+    overflow = actions[MAX_BUTTONS:]
+    lines = [
+        f"\U0001f6a6 {label} — GitHub gate needs your call",
+        f"Repo {facts['slug']}, trunk {proj['trunk']}. "
+        f"{len(shown)} item(s) below need a yes/no from you. I only ever "
+        f"act on your explicit approval — nothing merges or deletes until "
+        f"you tap.",
+        "",
+    ]
+    for aid, a in shown:
+        lines.append(action_explainer(a))
+        lines.append("")
+    if red or pend or wrong_base or merge_blocked or review_blocked:
+        aware = []
+        for p in red:
+            aware.append(f"   • PR #{p['number']} CI is RED — {p['title'][:50]} "
+                         f"(I won't offer a red PR; it goes back through the coder loop)")
+        for p in pend:
+            aware.append(f"   • PR #{p['number']} CI is {p['verdict']} — {p['verdict_detail']} "
+                         f"(not merge-actionable)")
+        for p in wrong_base:
+            aware.append(f"   • PR #{p['number']} targets {p['baseRefName']}, not protected trunk {proj['trunk']} "
+                         f"(not merge-actionable)")
+        for p in merge_blocked:
+            aware.append(f"   • PR #{p['number']} merge state is {p.get('mergeStateStatus')} / {p.get('mergeable')} "
+                         f"(update/reconcile before approval)")
+        for p in review_blocked:
+            aware.append(f"   • PR #{p['number']} reviewer gate blocked — {p['review_detail']} "
+                         f"(model-reported evidence is a trust limit, not proof)")
+        lines.append("For your awareness (not actionable here):")
+        lines.extend(aware)
+        lines.append("")
+    if overflow:
+        lines.append(f"+{len(overflow)} more pending action(s) not shown as buttons "
+                     f"(button cap {MAX_BUTTONS}) — say “gate pending” to list them all.")
+        lines.append("")
+    do_all = len(actions) >= 2
+    approve_help = (
+        "How to approve: tap a button below, or react \U0001f44d/✅ to this message, "
+        "or reply “approve” — for a single pending item I act it; if several match "
+        "I'll ask which.")
+    if do_all:
+        approve_help += (f" To clear the whole project in one go, tap “Do all "
+                         f"{len(actions)} of the above” — I run every item, "
+                         f"re-verifying each before it executes.")
+    approve_help += (f" Not ready? Tap “Not now” to snooze this project's asks "
+                     f"for {REASK_HOURS:.0f}h.")
+    lines.append(approve_help)
+
+    buttons = [(a["button"], f"/gate act eg:{aid}") for aid, a in shown]
+    # Supersede any prior pending batch/snooze for this project — a new ask
+    # replaces them so a stale "do all" can't fire against old state.
+    for sid, sa in state["actions"].items():
+        if (sa.get("project_key", sa.get("repo", "").lower()) == project_key
+                and sa["status"] == "pending"
+                and sa["kind"] in ("snooze", "batch")):
+            sa["status"] = "superseded"
+            sa["result"] = "newer gate ask posted"
+    if do_all:
+        batch_id = secrets.token_hex(6)
+        state["actions"][batch_id] = {
+            "key": f"batch:{int(now)}", "label": label, "project_key": project_key, "cfg": proj["cfg"],
+            "repo": facts["slug"], "trunk": proj["trunk"], "kind": "batch",
+            "desc": f"do all {len(actions)} pending action(s) for {label}",
+            "button": f"☑️ Do all {len(actions)} of the above",
+            "status": "pending", "created": now,
+        }
+        buttons.append((f"☑️ Do all {len(actions)} of the above", f"/gate act eg:{batch_id}"))
+    snooze_id = secrets.token_hex(6)
+    state["actions"][snooze_id] = {
+        "key": f"snooze:{int(now)}", "label": label, "project_key": project_key, "cfg": proj["cfg"],
+        "repo": facts["slug"], "trunk": proj["trunk"], "kind": "snooze",
+        "desc": f"snooze {label} gate asks for {REASK_HOURS:.0f}h",
+        "button": "⏸ Not now (snooze 24h)",
+        "status": "pending", "created": now,
+    }
+    buttons.append((f"⏸ Not now (snooze {REASK_HOURS:.0f}h)", f"/gate act eg:{snooze_id}"))
+    ok = send_message(dest, "\n".join(lines), buttons, dry=dry)
+    if ok and not dry:
+        state["posts"][project_key] = {"fingerprint": fp, "ts": now,
+                                 "snoozed_until": post.get("snoozed_until", 0)}
+        print(f"  posted approval message ({len(buttons)} buttons) to gate hub "
+              f"{dest['channel']} thread {dest['thread'] or '-'}")
+        log(f"POSTED {label} {len(actions)} action(s) fp={fp[:8]} -> hub "
+            f"{dest['target']}:{dest['thread'] or '-'}")
+    return False
+
+
 def sweep(dry=False):
     now = time.time()
     all_clean = True
@@ -580,173 +770,93 @@ def sweep(dry=False):
                 print(f"  !! duplicate canonical GitHub repo {slug} — refusing ambiguous project state")
                 all_clean = False
                 continue
-            label = proj["label"]
-            print(f"project {label} (cfg {Path(proj['cfg']).name}, trunk {proj['trunk']})")
+            print(f"project {proj['label']} (cfg {Path(proj['cfg']).name}, trunk {proj['trunk']})")
             facts, err = gather(proj)
             if err:
                 print(f"  !! {err}")
                 all_clean = False
                 continue
-            project_key = facts["slug"].strip().lower()
-
-            # info lines
-            red = [p for p in facts["prs"] if p["verdict"] == "red"]
-            pend = [p for p in facts["prs"] if p["verdict"] in ("pending", "missing-required", "no-ci", "unavailable")]
-            wrong_base = [p for p in facts["prs"] if p["baseRefName"] != proj["trunk"]]
-            merge_blocked = [p for p in facts["prs"] if p["baseRefName"] == proj["trunk"] and (p.get("mergeable") != "MERGEABLE" or p.get("mergeStateStatus") != "CLEAN")]
-            review_blocked = [p for p in facts["prs"] if p["baseRefName"] == proj["trunk"] and p.get("mergeable") == "MERGEABLE" and p.get("mergeStateStatus") == "CLEAN" and p["verdict"] == "green" and not p["review_ready"]]
-            drafts = [p for p in facts["prs"] if p["isDraft"]]
-            print(f"  repo {facts['slug']}: {len(facts['branches'])} branch(es), "
-                  f"{len(facts['prs'])} open PR(s)")
-            for p in red:
-                print(f"  ❌ PR #{p['number']} CI RED — {p['title'][:60]} {p['url']}")
-            for p in pend:
-                print(f"  ⏳ PR #{p['number']} CI {p['verdict']} ({p['verdict_detail']}) — {p['title'][:60]}")
-            for p in wrong_base:
-                print(f"  ⛔ PR #{p['number']} targets {p['baseRefName']}, not protected trunk {proj['trunk']} — {p['title'][:60]}")
-            for p in merge_blocked:
-                print(f"  ⛔ PR #{p['number']} merge state {p.get('mergeStateStatus')} / {p.get('mergeable')} — refresh/update branch first")
-            for p in review_blocked:
-                print(f"  ⛔ PR #{p['number']} reviewer gate blocked ({p['review_detail']}) — {p['title'][:60]}")
-            for p in drafts:
-                print(f"  \U0001f4dd PR #{p['number']} draft — {p['title'][:60]}")
-
-            desired = desired_actions(proj, facts)
-
-            # reconcile pending actions for this project
-            existing = {a["key"]: (aid, a) for aid, a in state["actions"].items()
-                        if a.get("project_key", a.get("repo", "").lower()) == project_key and a["status"] == "pending"}
-            for key, (aid, a) in existing.items():
-                if key not in desired:
-                    a["status"] = "superseded"
-                    a["result"] = "repo state changed before approval"
-            actions = []  # (id, action)
-            for key, tpl in desired.items():
-                if key in existing and existing[key][1]["status"] == "pending":
-                    actions.append((existing[key][0], existing[key][1]))
-                    continue
-                aid = secrets.token_hex(6)
-                a = {"key": key, "label": label, "project_key": project_key, "cfg": proj["cfg"],
-                     "repo": facts["slug"], "trunk": proj["trunk"],
-                     "status": "pending", "created": now, **tpl}
-                state["actions"][aid] = a
-                actions.append((aid, a))
-
-            if not actions:
-                if red or pend or wrong_base or merge_blocked or review_blocked:
-                    all_clean = False
-                    print("  no approvals needed (CI/reviewer-blocked PRs ride the coder loop)")
-                else:
-                    print("  clean ✓ (trunk-only or only active PR work)")
-                state["posts"].setdefault(project_key, {})["fingerprint"] = ""
-                continue
-
-            all_clean = False
-            fp = hashlib.sha1(json.dumps(sorted(desired.keys())).encode()).hexdigest()
-            post = state["posts"].get(project_key, {})
-            fresh = post.get("fingerprint") != fp
-            aged = now - post.get("ts", 0) >= REASK_HOURS * 3600
-            snoozed = now < post.get("snoozed_until", 0)
-            for aid, a in actions:
-                print(f"  pending eg:{aid}  {a['desc']}")
-            if snoozed and not fresh:
-                print(f"  (snoozed until {time.strftime('%H:%M', time.localtime(post['snoozed_until']))} — not re-posting)")
-                continue
-            if not (fresh or aged):
-                h = (now - post.get("ts", now)) / 3600
-                print(f"  (asked {h:.1f}h ago, unchanged — not re-posting; re-ask after {REASK_HOURS:.0f}h)")
-                continue
-
-            shown = actions[:MAX_BUTTONS]
-            overflow = actions[MAX_BUTTONS:]
-            lines = [
-                f"\U0001f6a6 {label} — GitHub gate needs your call",
-                f"Repo {facts['slug']}, trunk {proj['trunk']}. "
-                f"{len(shown)} item(s) below need a yes/no from you. I only ever "
-                f"act on your explicit approval — nothing merges or deletes until "
-                f"you tap.",
-                "",
-            ]
-            for aid, a in shown:
-                lines.append(action_explainer(a))
-                lines.append("")
-            if red or pend or wrong_base or merge_blocked or review_blocked:
-                aware = []
-                for p in red:
-                    aware.append(f"   • PR #{p['number']} CI is RED — {p['title'][:50]} "
-                                 f"(I won't offer a red PR; it goes back through the coder loop)")
-                for p in pend:
-                    aware.append(f"   • PR #{p['number']} CI is {p['verdict']} — {p['verdict_detail']} "
-                                 f"(not merge-actionable)")
-                for p in wrong_base:
-                    aware.append(f"   • PR #{p['number']} targets {p['baseRefName']}, not protected trunk {proj['trunk']} "
-                                 f"(not merge-actionable)")
-                for p in merge_blocked:
-                    aware.append(f"   • PR #{p['number']} merge state is {p.get('mergeStateStatus')} / {p.get('mergeable')} "
-                                 f"(update/reconcile before approval)")
-                for p in review_blocked:
-                    aware.append(f"   • PR #{p['number']} reviewer gate blocked — {p['review_detail']} "
-                                 f"(model-reported evidence is a trust limit, not proof)")
-                lines.append("For your awareness (not actionable here):")
-                lines.extend(aware)
-                lines.append("")
-            if overflow:
-                lines.append(f"+{len(overflow)} more pending action(s) not shown as buttons "
-                             f"(button cap {MAX_BUTTONS}) — say “gate pending” to list them all.")
-                lines.append("")
-            do_all = len(actions) >= 2
-            approve_help = (
-                "How to approve: tap a button below, or react \U0001f44d/✅ to this message, "
-                "or reply “approve” — for a single pending item I act it; if several match "
-                "I'll ask which.")
-            if do_all:
-                approve_help += (f" To clear the whole project in one go, tap “Do all "
-                                 f"{len(actions)} of the above” — I run every item, "
-                                 f"re-verifying each before it executes.")
-            approve_help += (f" Not ready? Tap “Not now” to snooze this project's asks "
-                             f"for {REASK_HOURS:.0f}h.")
-            lines.append(approve_help)
-
-            buttons = [(a["button"], f"/gate act eg:{aid}") for aid, a in shown]
-            # Supersede any prior pending batch/snooze for this project — a new ask
-            # replaces them so a stale "do all" can't fire against old state.
-            for sid, sa in state["actions"].items():
-                if (sa.get("project_key", sa.get("repo", "").lower()) == project_key
-                        and sa["status"] == "pending"
-                        and sa["kind"] in ("snooze", "batch")):
-                    sa["status"] = "superseded"
-                    sa["result"] = "newer gate ask posted"
-            if do_all:
-                batch_id = secrets.token_hex(6)
-                state["actions"][batch_id] = {
-                    "key": f"batch:{int(now)}", "label": label, "project_key": project_key, "cfg": proj["cfg"],
-                    "repo": facts["slug"], "trunk": proj["trunk"], "kind": "batch",
-                    "desc": f"do all {len(actions)} pending action(s) for {label}",
-                    "button": f"☑️ Do all {len(actions)} of the above",
-                    "status": "pending", "created": now,
-                }
-                buttons.append((f"☑️ Do all {len(actions)} of the above", f"/gate act eg:{batch_id}"))
-            snooze_id = secrets.token_hex(6)
-            state["actions"][snooze_id] = {
-                "key": f"snooze:{int(now)}", "label": label, "project_key": project_key, "cfg": proj["cfg"],
-                "repo": facts["slug"], "trunk": proj["trunk"], "kind": "snooze",
-                "desc": f"snooze {label} gate asks for {REASK_HOURS:.0f}h",
-                "button": "⏸ Not now (snooze 24h)",
-                "status": "pending", "created": now,
-            }
-            buttons.append((f"⏸ Not now (snooze {REASK_HOURS:.0f}h)", f"/gate act eg:{snooze_id}"))
-            ok = send_message(dest, "\n".join(lines), buttons, dry=dry)
-            if ok and not dry:
-                state["posts"][project_key] = {"fingerprint": fp, "ts": now,
-                                         "snoozed_until": post.get("snoozed_until", 0)}
-                print(f"  posted approval message ({len(buttons)} buttons) to gate hub "
-                      f"{dest['channel']} thread {dest['thread'] or '-'}")
-                log(f"POSTED {label} {len(actions)} action(s) fp={fp[:8]} -> hub "
-                    f"{dest['target']}:{dest['thread'] or '-'}")
+            if not process_project(state, proj, facts, dest, now, dry=dry):
+                all_clean = False
         if not dry:
             save_state(state)
     if all_clean:
         print("ALL_CLEAN")
+
+
+def offer(repo_dir, pr_number, dry=False):
+    """Post the merge ask for ONE just-green PR straight to the gate thread.
+
+    The dispatch CI watcher calls this the moment a PR's checks go green, so the
+    operator gets the merge button (with its full what/consequence/why brief) in
+    the gate thread at once — instead of the watcher firing a whole-repo sweep the
+    operator then has to trigger and hunt through. Reuses desired_actions +
+    process_project, so the gates and the message are identical to a normal sweep;
+    re-verifies the PR at mint time. A green-but-not-yet-mergeable PR (e.g. behind
+    trunk) posts a short awareness note rather than a dead button.
+    """
+    repo_dir = str(Path(repo_dir).expanduser())
+    proj = next((p for p in projects()
+                 if str(Path(p["repo_dir"]).expanduser()) == repo_dir), None)
+    if not proj:
+        print(f"NOT-OFFERED no project config has RDD_REPO_DIR={repo_dir}")
+        sys.exit(4)
+    if not Path(proj["repo_dir"], ".git").is_dir():
+        print(f"NOT-OFFERED {proj['repo_dir']} is not a git repo")
+        sys.exit(4)
+    slug, err = repo_slug(proj)
+    if not slug:
+        print(f"NOT-OFFERED cannot resolve GitHub repo ({err})")
+        sys.exit(4)
+    pr, err = gh_json(["pr", "view", str(pr_number), "-R", slug, "--json",
+                       "number,title,headRefName,headRefOid,baseRefName,baseRefOid,"
+                       "isDraft,url,mergeable,mergeStateStatus"], timeout=30)
+    if pr is None:
+        print(f"NOT-OFFERED cannot read PR #{pr_number} ({err})")
+        sys.exit(4)
+    pr["verdict"], pr["verdict_detail"] = pr_checks_verdict(slug, pr["number"], proj["required_checks"])
+    pr["review_ready"], pr["review_detail"] = reviewer_gate(slug, pr["number"], pr["headRefOid"])
+    facts = {"slug": slug, "prs": [pr], "branches": [], "stale": []}
+    dest = hub_dest()
+    now = time.time()
+    print(f"offer: PR #{pr['number']} in {slug} (trunk {proj['trunk']})")
+    with Locked():
+        state = load_state()
+        # full_scan=False: judge only THIS PR, never supersede the project's other
+        # pending actions. force=True: a fresh green event always posts.
+        process_project(state, proj, facts, dest, now, dry=dry,
+                        full_scan=False, force=True)
+        project_key = slug.strip().lower()
+        minted = next((aid for aid, a in state["actions"].items()
+                       if a["status"] == "pending" and a.get("kind") == "merge"
+                       and a.get("project_key") == project_key
+                       and a.get("pr") == pr["number"]
+                       and a.get("head_sha") == pr["headRefOid"]), None)
+        if not dry:
+            save_state(state)
+    if minted:
+        print(f"OFFERED eg:{minted} — merge ask for PR #{pr['number']} posted to the gate thread")
+        sys.exit(0)
+    # No merge action: say why. If it is green+reviewed but simply not yet
+    # mergeable (e.g. behind trunk), ping the hub so a fresh-green PR that only
+    # needs a branch update is not left silent.
+    if pr["isDraft"]:
+        reason = "it is a draft"
+    elif pr["baseRefName"] != proj["trunk"]:
+        reason = f"it targets {pr['baseRefName']}, not protected trunk {proj['trunk']}"
+    elif pr["verdict"] != "green":
+        reason = f"CI is {pr['verdict']} ({pr['verdict_detail']})"
+    elif not pr["review_ready"]:
+        reason = f"reviewer gate blocked ({pr['review_detail']})"
+    elif pr.get("mergeable") != "MERGEABLE" or pr.get("mergeStateStatus") != "CLEAN":
+        reason = (f"merge state is {pr.get('mergeStateStatus')}/{pr.get('mergeable')} — "
+                  f"the branch needs updating before it can merge")
+        send_message(dest, f"⛔ PR #{pr['number']} — CI is green but not yet mergeable\n"
+                           f"{reason}\n{pr['url']}", dry=dry)
+    else:
+        reason = "no merge action was produced"
+    print(f"NOT-OFFERED PR #{pr['number']}: {reason}")
+    sys.exit(0)
 
 
 # ---- act ------------------------------------------------------------------------
@@ -946,6 +1056,13 @@ def main():
     mode, rest = args[0], args[1:]
     if mode == "sweep":
         sweep(dry="--dry-run" in rest or os.environ.get("EDGE_GATE_DRYRUN") == "1")
+    elif mode == "offer":
+        dry = "--dry-run" in rest or os.environ.get("EDGE_GATE_DRYRUN") == "1"
+        pos = [a for a in rest if a != "--dry-run"]
+        if len(pos) < 2 or not re.fullmatch(r"\d+", pos[1]):
+            print("usage: edge-pr-gate.sh offer <repo-dir> <pr-number> [--dry-run]")
+            sys.exit(2)
+        offer(pos[0], int(pos[1]), dry=dry)
     elif mode == "act":
         if not rest:
             print("usage: edge-pr-gate.sh act <id>")
@@ -961,7 +1078,7 @@ def main():
         for aid, a in sorted(done, key=lambda r: r[1].get("acted", 0))[-8:]:
             print(f"{a['status'].upper()} eg:{aid}  [{a['label']}] {a.get('result', '')[:100]}")
     else:
-        print(f"unknown mode '{mode}' — sweep | act <id> | pending [label] | status")
+        print(f"unknown mode '{mode}' — sweep | offer <repo-dir> <pr> | act <id> | pending [label] | status")
         sys.exit(2)
 
 
