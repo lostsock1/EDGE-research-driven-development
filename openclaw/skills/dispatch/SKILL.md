@@ -1,6 +1,6 @@
 ---
 name: dispatch
-description: "Coder-run follow-ups — inspect what a dispatch did, re-run it, or send a red PR back to be fixed. Usage: /dispatch [list|log <run-id>|diff <run-id>|ci <run-id>|health [run-id]|retry <run-id>|fix <run-id>]"
+description: "Coder-run follow-ups — inspect what a dispatch did, re-run it, send a red PR back to be fixed, or one-tap dispatch a staged work order. Usage: /dispatch [list|log <run-id>|diff <run-id>|ci <run-id>|health [run-id]|retry <run-id>|fix <run-id>|go <WO-id>]"
 user-invocable: true
 ---
 
@@ -28,11 +28,12 @@ Sub-commands:
 **These spend a real model run — only on the operator's explicit say-so (a button tap counts):**
 - `retry <run-id>` — re-dispatch that run's *original* task, against the same project. Use after an all-tiers-down failure, or when a run produced nothing usable.
 - `fix <run-id>` — dispatch "make the failing CI pass" against that run's PR. The coder checks out the existing branch, reads the failing checks, and pushes a fix to that same branch. It does not open a second PR.
+- `go <WO-id>` — dispatch a work order the research agent **staged** for you. When it proposes a work order it posts a 🚀 button carrying `/dispatch go <WO-id>`; tapping it recovers the staged task and its project and dispatches — the one-tap replacement for typing "go". Single-use, so a double-tap can't double-dispatch (a second `go` reports the work order is already dispatched).
 
 Rules:
 - `retry` and `fix` are async, exactly like a normal dispatch: they print `DISPATCHED <new-run-id>` within seconds and your exec ends there. Do **not** wait, poll, or re-run them. The completion summary and CI verdict arrive by themselves as messages in the project thread.
 - At dispatch time you know only the new run id. **Never state or guess which model or tier is running** — claiming one before the completion message arrives is fabrication.
 - Never invent a run id. If the operator refers to a run you cannot identify, run `list` and ask which one.
 - This skill never merges. A green PR still goes through the PR gate (`/gate`), which re-verifies every gate at the moment the operator approves.
-- Dispatching *new* work is not part of this skill — that stays the explicit `edge-coder-run.sh '<task>'` step with the project's own config, as described in the thread's brief.
+- `go` is the one new-work dispatch this skill performs, and only against a work order the agent already staged and showed you — the review gate is unchanged (you read the work order before tapping). *Composing* new work is not part of this skill: the agent stages it (`edge-coder-run.sh stage '<task>'`) as part of `propose`. Free-form dispatch stays the explicit `edge-coder-run.sh '<task>'` step with the project's own config.
 - Relay the script's stdout faithfully, in plain language. If it exits non-zero, say what it refused and why rather than retrying with a different id.

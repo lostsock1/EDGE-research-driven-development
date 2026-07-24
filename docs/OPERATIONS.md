@@ -10,8 +10,8 @@ Send these to the research agent in the project thread:
 |---|---|
 | `status` | resume from disk (RESUME.md + repo state), report plainly |
 | `research <topic/link>` | research, distill to mechanisms, stage what matters |
-| `propose` | turn the best staged finding into a work order and post it for your go |
-| `go` | dispatch the posted work order to the coders |
+| `propose` | turn the best staged finding into a work order, stage it (`edge-coder-run.sh stage`), and post it with a 🚀 **Dispatch this work order** button — so your go is one tap, not a typed command |
+| `go` (or tap 🚀) | dispatch the posted work order to the coders. The button carries `/dispatch go <WO-id>`; the staged task and its project are recovered from the id, single-use. Typing `go` still works |
 | `sweep` | GitHub hygiene pass: open PRs, stale branches, failed runs, doc drift |
 | `answer requests` | work the open items in EDGE_COLLABORATION.md |
 | `/dispatch list` | recent coder runs with their PR and CI state — the way back in when you have lost the thread |
@@ -118,6 +118,7 @@ name a project — the button already knows which run, PR and repo it belongs to
 
 | Message | Buttons it carries |
 |---|---|
+| Work order proposed | **🚀 dispatch this work order** (`go` — one tap instead of typing it) |
 | Dispatch finished | open the PR · what changed · full log · *send it back* (only when there is no PR or review did not pass) |
 | Dispatch failed, all tiers down | which tiers are alive · retry the same task · full log |
 | CI red | **send it back to the coder** · see failing checks · full log |
@@ -128,9 +129,11 @@ name a project — the button already knows which run, PR and repo it belongs to
 | Heartbeat found a waiting packet / dead research service | read it · accept · reject · check the service |
 | PR gate ask | merge · prune · do-all · snooze (unchanged — the gate has always had these) |
 
-Two of these spend a real model run: **send it back** (`fix`) and **retry**. Both
-are one tap by design, and the message above the button says what the coder will
-be told. Nothing else in the list changes any state.
+Three of these spend a real model run: **🚀 dispatch this work order** (`go`),
+**send it back** (`fix`) and **retry**. All are one tap by design, and the
+message above the button says what will be dispatched — you review the work
+order before tapping 🚀, so the go decision stays yours. Nothing else in the
+list changes any state.
 
 Tapped buttons arrive as `/dispatch …`, `/research …` or `/gate …` commands and
 are handled by the matching skill. Typing them by hand works identically —
