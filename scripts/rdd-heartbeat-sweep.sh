@@ -13,6 +13,10 @@
 #      dispatch archives its assignment, so anything old here means a dispatch
 #      died silently) and packets pending operator Accept/Reject for >24h.
 #   3. OpenScience reachability.
+#   4. PR-gate backlog: merges / branch-cleanups already sitting in the gate
+#      awaiting approval (gate STATE only, no GitHub), so a green PR whose "ready
+#      to merge" message was missed resurfaces here instead of only on the gate's
+#      24h re-ask. Snapshot-deduped — surfaced once per change, not every beat.
 #
 # Output contract for the heartbeat: if the last line is NO_CHANGE, reply
 # HEARTBEAT_OK and stop. If it is CHANGED, summarize the ATTENTION/BLOCKED lines
@@ -167,6 +171,35 @@ PY
   if ! curl -sf -m 8 -o /dev/null "${RDD_RESEARCH_OS_BASE:-http://127.0.0.1:3457}/session"; then
     echo "ATTENTION: OpenScience server is DOWN"
     emit_action "🩺 Check the research service" "/research status"
+  fi
+
+  # --- 4. gate merge backlog ------------------------------------------------------
+  # Surface merges / branch-cleanups already sitting in the PR gate awaiting your
+  # approval, so a green PR whose "ready to merge" chat message was missed —
+  # gateway restart, CI-watcher timeout, a dropped notification — resurfaces on the
+  # next heartbeat instead of only when the gate re-asks (RDD_GATE_REASK_HOURS,
+  # default 24h). Reads the gate's STATE ONLY (no GitHub calls, no re-posting), so
+  # it is cheap and survives restarts; the sweep snapshot de-dups so a stable
+  # backlog is surfaced once, not every beat (the 2026-07-14 heartbeat-spam lesson).
+  # This is a nudge, never the approval surface — acting still goes through the
+  # gate, which re-verifies every gate at the moment you tap.
+  GATE_STATE="${RDD_GATE_STATE_DIR:-$HOME/.local/state/edge-rdd/pr-gate}/state.json"
+  n_gate="$(python3 - "$GATE_STATE" <<'PY' 2>/dev/null
+import json, sys
+try:
+    actions = json.load(open(sys.argv[1])).get("actions", {})
+except Exception:
+    print(0); raise SystemExit
+# Same filter as edge-pr-gate.sh's `pending`: every pending action a human can
+# approve (merge / prune / destructive delete), excluding the snooze/batch
+# control pseudo-actions.
+print(sum(1 for a in actions.values()
+          if a.get("status") == "pending" and a.get("kind") not in ("snooze", "batch")))
+PY
+)"
+  if [ "${n_gate:-0}" -gt 0 ]; then
+    echo "ATTENTION: $n_gate gate action(s) awaiting your approval (green PR merges / branch cleanups) — held in the gate, nothing acts without your tap"
+    emit_action "🚦 Review the gate queue" "/gate sweep"
   fi
 )"
 
