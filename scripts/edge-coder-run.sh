@@ -1097,11 +1097,15 @@ $pr_url" \
                 "🔗 Open PR #$pr_num on GitHub"$'\t'"url:$pr_url" \
                 "$(btn "📄 What did it actually change?" diff)"
             else
-              # Trigger an immediate gate sweep so the merge button appears now,
-              # without waiting for the next on-demand /gate sweep.
+              # Post THIS PR's merge ask (button + brief) straight to the gate
+              # thread, so the merge button appears at once. `offer` re-verifies
+              # every gate and mints the same action a sweep would — but scoped to
+              # this one PR, instead of firing a whole-repo sweep the operator then
+              # has to trigger and hunt through. The "/gate sweep" button below
+              # stays as a manual fallback (no longer an auto-redundant second sweep).
               if [ -x "$GATE_SCRIPT" ]; then
-                bash "$GATE_SCRIPT" sweep >>"$LOG" 2>&1 &
-                echo "[$(ts)] gate sweep triggered for PR#$pr_num" >> "$LOG"
+                bash "$GATE_SCRIPT" offer "$DIR" "$pr_num" >>"$LOG" 2>&1 &
+                echo "[$(ts)] gate offer triggered for PR#$pr_num (dir=$DIR)" >> "$LOG"
               fi
               send_tg "✅ PR #$pr_num — CI green, ready for your merge decision
 all checks passed, every required context reported, review gate eligible

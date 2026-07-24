@@ -428,5 +428,21 @@ exit 0
             self.assertFalse(canary.exists(), "meta value was evaluated as shell")
 
 
+class GreenMergeOfferTests(unittest.TestCase):
+    """On CI-green the detached watcher offers THIS PR's merge ask
+    (`edge-pr-gate.sh offer <dir> <pr>`) straight to the gate thread, instead of
+    firing a whole-repo sweep the operator must then trigger and hunt through.
+    The watcher runs detached on a live success path, so this is pinned at source
+    level like the button-cap guard."""
+
+    src = SCRIPT.read_text()
+
+    def test_green_branch_offers_this_pr_not_a_whole_repo_sweep(self):
+        self.assertIn('"$GATE_SCRIPT" offer "$DIR" "$pr_num"', self.src)
+        # No path in the wrapper auto-runs a whole-repo sweep (the "/gate sweep"
+        # chat button is a manual fallback, a different string).
+        self.assertNotIn('"$GATE_SCRIPT" sweep', self.src)
+
+
 if __name__ == "__main__":
     unittest.main()
